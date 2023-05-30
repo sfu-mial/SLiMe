@@ -37,7 +37,7 @@ def main():
     callbacks = [checkpoint_callback, lr_monitor]
     trainer = pl.Trainer(
         accelerator="gpu",
-        # strategy="ddp",
+        # strategy="dp",
         callbacks=callbacks,
         default_root_dir=config.base_dir,
         max_epochs=config.epochs,

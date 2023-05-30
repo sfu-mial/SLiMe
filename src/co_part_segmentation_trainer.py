@@ -33,7 +33,7 @@ class CoSegmenterTrainer(pl.LightningModule):
         self.stable_diffusion.setup(self.device)
 
     def training_step(self, batch, batch_idx):
-        src_images, emulated_attention_maps, _ = batch
+        src_images, emulated_attention_maps, _, _, _ = batch
         images_grid = torchvision.utils.make_grid(src_images)
         attn_grid = torchvision.utils.make_grid(emulated_attention_maps)
         self.logger.experiment.add_image("images", images_grid, batch_idx)
@@ -58,15 +58,15 @@ class CoSegmenterTrainer(pl.LightningModule):
         all_processed_attention_maps = list(all_processed_attention_maps_dict.values())
         sd_attention_maps = torch.stack(all_processed_attention_maps, dim=0).mean(dim=0)
 
-        loss = torch.nn.functional.mse_loss(sd_attention_maps[:, 1], emulated_attention_maps)
-
+        loss = torch.nn.functional.mse_loss(sd_attention_maps[:, 1].to(self.device), emulated_attention_maps)
+        self.log("mse_loss", loss, on_step=True, sync_dist=True)
         return loss
 
     def on_train_end(self) -> None:
         torch.save(self.text_embedding, os.path.join(self.config.base_dir, "optimized_text_embedding.pth"))
 
     def test_step(self, batch, batch_idx):
-        target_images, emulated_attention_maps, y, x = batch
+        target_images, emulated_attention_maps, y, x, target_images_original = batch
         with torch.no_grad():
             loss, raw_attention_maps = self.stable_diffusion.train_step(
                 torch.repeat_interleave(self.sd_text_embeddings, self.config.batch_size, 0), target_images, t=torch.tensor(8), back_propagate_loss=False)
@@ -91,12 +91,16 @@ class CoSegmenterTrainer(pl.LightningModule):
         sd_attention_maps = torch.stack(all_processed_attention_maps, dim=0).mean(dim=0)
         all_cropped_attention_maps = torch.zeros((self.config.batch_size, int(512/self.config.crop_ratio), int(512/self.config.crop_ratio)))
         for i in range(self.config.batch_size):
-            all_cropped_attention_maps[i, y[i]:y[i]+512, x[i]:x[i]+512] = sd_attention_maps[i, 1]
+            flattened_attention_map = sd_attention_maps[i, 1].flatten()
+            values, indices = torch.sort(flattened_attention_map, descending=True)
+            all_cropped_attention_maps[i, y[i]:y[i]+512, x[i]:x[i]+512] = torch.where(sd_attention_maps[i, 1]>values[200], 1, 0)
         final_attention_map = all_cropped_attention_maps.mean(dim=0)
-        images_grid = torchvision.utils.make_grid(target_images)
-        attn_grid = torchvision.utils.make_grid(final_attention_map*255)
-        self.logger.experiment.add_image("images", images_grid, batch_idx)
-        self.logger.experiment.add_image("attentions", attn_grid, batch_idx)
+        images_grid = torchvision.utils.make_grid(target_images_original)
+        attn_images_grid = torchvision.utils.make_grid(target_images_original.to(self.device)*(1-final_attention_map[None, None, ...]).to(self.device))
+        attn_grid = torchvision.utils.make_grid(final_attention_map)
+        self.logger.experiment.add_image("images", images_grid, 0)
+        self.logger.experiment.add_image("attn_images", attn_images_grid, 0)
+        self.logger.experiment.add_image("attentions", attn_grid, 0)
         return loss
 
     def configure_optimizers(self):

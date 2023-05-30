@@ -13,12 +13,13 @@ class SampleDataset(Dataset):
         self.image = transforms.functional.resize(Image.open(image_dir), size=(int(512/crop_ratio), int(512/crop_ratio)))
 
         point_y, point_x = location
-        x, y = torch.meshgrid(torch.linspace(-1, 1, 100), torch.linspace(-1, 1, 100), indexing="xy")
+        gaussian_radius = 28
+        x, y = torch.meshgrid(torch.linspace(-1, 1, gaussian_radius*2), torch.linspace(-1, 1, gaussian_radius*2), indexing="xy")
         d = torch.sqrt(x * x + y * y)
-        sigma, mu = 0.2798, 0
+        sigma, mu = 1, 0
         gaussian_dist = torch.exp(-(torch.pow(d - mu, 2) / (2.0 * sigma ** 2)))
         self.emulated_attention_map = torch.zeros((512, 512))
-        self.emulated_attention_map[max(0, point_y-50): min(512, point_y+50), max(0, point_x-50): min(512, point_x+50)] = gaussian_dist[max(0, 50-point_y):100-max(0, 50+point_y-512), max(0, 50-point_x):100-max(0, 50+point_x-512)]
+        self.emulated_attention_map[max(0, point_y-gaussian_radius): min(512, point_y+gaussian_radius), max(0, point_x-gaussian_radius): min(512, point_x+gaussian_radius)] = gaussian_dist[max(0, gaussian_radius-point_y):100-max(0, gaussian_radius+point_y-512), max(0, gaussian_radius-point_x):100-max(0, gaussian_radius+point_x-512)]
         self.emulated_attention_map = torch.nn.functional.interpolate(self.emulated_attention_map[None, None, ...], size=(int(512/crop_ratio), int(512/crop_ratio)), mode="bilinear")[0, 0]
         self.crop_size = 512
         self.num_cropped = num_crops
@@ -27,11 +28,11 @@ class SampleDataset(Dataset):
         y, x, h, w = transforms.RandomCrop.get_params(self.image, output_size=(self.crop_size, self.crop_size))
 
         image = transforms.functional.to_tensor(self.image)
-        image = image[:, y:y+h, x:x+w]
+        cropped_image = image[:, y:y+h, x:x+w]
 
         emulated_attention_map = self.emulated_attention_map[y:y+h, x:x+w]
 
-        return image, emulated_attention_map, y, x
+        return cropped_image, emulated_attention_map, y, x, image
 
     def __len__(self):
         return self.num_cropped

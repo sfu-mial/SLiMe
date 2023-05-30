@@ -3,5 +3,5 @@ checkpoints/
 cps_venv/
 diffusers/
 lightning_logs/
-optimized_text_embedding.pth
+checkpoints/version_0/optimized_text_embedding.pth
 Untitled.ipynb
