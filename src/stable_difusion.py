@@ -13,15 +13,16 @@ from copy import deepcopy
 
 
 class StableDiffusion(nn.Module):
-    def __init__(self, sd_version='2.0', return_attentions=False, step_guidance=None):
+    def __init__(self, sd_version='2.0', return_attentions=False, step_guidance=None, partial_run=False):
         super().__init__()
 
         self.sd_version = sd_version
         self.step_guidance = step_guidance
         self.return_attentions = return_attentions
+        self.partial_run = partial_run
         print(f'[INFO] loading stable diffusion...')
 
-        if self.sd_version == '2.0':
+        if self.sd_version == '2.1':
             model_key = "stabilityai/stable-diffusion-2-1-base"
             # model_key = "stabilityai/stable-diffusion-2-base"
         elif self.sd_version == '1.5':
@@ -84,11 +85,11 @@ class StableDiffusion(nn.Module):
             # 'up_blocks[1].attentions[2].transformer_blocks[0].attn1',
             'up_blocks[1].attentions[2].transformer_blocks[0].attn2',  ##########
             # 'up_blocks[2].attentions[0].transformer_blocks[0].attn1',
-            'up_blocks[2].attentions[0].transformer_blocks[0].attn2',
+            'up_blocks[2].attentions[0].transformer_blocks[0].attn2',  ##
             # 'up_blocks[2].attentions[1].transformer_blocks[0].attn1',
-            'up_blocks[2].attentions[1].transformer_blocks[0].attn2',
+            'up_blocks[2].attentions[1].transformer_blocks[0].attn2',  ##
             # 'up_blocks[2].attentions[2].transformer_blocks[0].attn1',
-            'up_blocks[2].attentions[2].transformer_blocks[0].attn2',
+            'up_blocks[2].attentions[2].transformer_blocks[0].attn2',  ##
             # 'up_blocks[3].attentions[0].transformer_blocks[0].attn1',
             # 'up_blocks[3].attentions[0].transformer_blocks[0].attn2',
             # 'up_blocks[3].attentions[1].transformer_blocks[0].attn1',
@@ -101,6 +102,11 @@ class StableDiffusion(nn.Module):
 
         self.attention_maps = {}
         self.noise = None
+        if self.partial_run:
+            del self.unet.up_blocks[3]
+            del self.unet.conv_norm_out
+            del self.unet.conv_act
+            del self.unet.conv_out
 
         def create_nested_hook(n):
             def hook(module, input, output):
@@ -183,29 +189,31 @@ class StableDiffusion(nn.Module):
             # pred noise
             latent_model_input = torch.cat([latents_noisy] * 2)
             noise_pred_ = self.unet(latent_model_input.to(self.device1), t.to(self.device1),
-                                    encoder_hidden_states=text_embeddings.to(self.device1)).sample.to(self.device)
+                                    encoder_hidden_states=text_embeddings.to(self.device1), partial_run=self.partial_run).sample.to(self.device)
 
         # torch.cuda.synchronize(); print(f'[TIME] guiding: unet {time.time() - _t:.4f}s')
 
-        # perform guidance (high scale from paper!)
-        noise_pred_uncond, noise_pred_text = noise_pred_.chunk(2)
-        noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
+        if not self.partial_run:
+            # perform guidance (high scale from paper!)
+            noise_pred_uncond, noise_pred_text = noise_pred_.chunk(2)
+            noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
 
-        # w(t), sigma_t^2
-        # w = (1 - self.alphas[t])
-        w = self.alphas[t] ** 0.5 * (1 - self.alphas[t])
-        grad = w * (noise_pred - noise)
-        # clip grad for stable training?
-        # grad = grad.clamp(-10, 10)
-        grad = torch.nan_to_num(grad)
-        loss = F.mse_loss(noise_pred, noise.float())
-        # manually backward, since we omitted an item in grad and cannot simply autodiff.
-        # _t = time.time()
-        if back_propagate_loss:
-            latents.backward(gradient=grad * loss_coef, retain_graph=True)
-        # torch.cuda.synchronize(); print(f'[TIME] guiding: backward {time.time() - _t:.4f}s')
+            # w(t), sigma_t^2
+            # w = (1 - self.alphas[t])
+            w = self.alphas[t] ** 0.5 * (1 - self.alphas[t])
+            grad = w * (noise_pred - noise)
+            # clip grad for stable training?
+            # grad = grad.clamp(-10, 10)
+            grad = torch.nan_to_num(grad)
+            loss = F.mse_loss(noise_pred, noise.float())
+            # manually backward, since we omitted an item in grad and cannot simply autodiff.
+            # _t = time.time()
+            if back_propagate_loss:
+                latents.backward(gradient=grad * loss_coef, retain_graph=True)
+            # torch.cuda.synchronize(); print(f'[TIME] guiding: backward {time.time() - _t:.4f}s')
 
-        return loss, self.attention_maps
+            return loss, self.attention_maps
+        return 0, self.attention_maps
 
     def produce_latents(self, text_embeddings, height=512, width=512, num_inference_steps=50, guidance_scale=7.5,
                         latents=None):
@@ -224,7 +232,7 @@ class StableDiffusion(nn.Module):
 
                 # predict the noise residual
                 with torch.no_grad():
-                    noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=text_embeddings)['sample']
+                    noise_pred = self.unet(latent_model_input.to(self.device1), t.to(self.device1), encoder_hidden_states=text_embeddings.to(self.device1))['sample'].to(self.device)
 
                 # perform guidance
                 noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
