@@ -94,7 +94,7 @@ def adjust_bbox_coords(long_side_length, short_side_length, short_side_coord_min
 
 
 class PascalVOCPartDataset(Dataset):
-    def __init__(self, ann_file_names, object_size_thresh={"car": 50 * 50, "horse": 32 * 32}, train=True, train_data_id=0, num_crops=1, mask_size=256, fill_background_with_black=False):
+    def __init__(self, ann_file_names, object_size_thresh={"car": 50 * 50, "horse": 32 * 32}, train=True, train_data_id=0, num_crops=1, mask_size=256, fill_background_with_black=False, remove_overlapping_objects=False, object_overlapping_threshold=0.05):
         super().__init__()
         self.train = train
         self.train_data_id = train_data_id
@@ -116,7 +116,43 @@ class PascalVOCPartDataset(Dataset):
             ann_file_path, img_file_path = get_file_dirs(ann_file_name)
             anns = io.loadmat(ann_file_path)['anno'][0, 0][1]
             num_objects = anns.shape[1]
+            object_ids_to_remove = []
+            if remove_overlapping_objects:
+                object_bbox_masks = []
+                for object_id in range(num_objects):
+                    num_parts = anns[0, object_id][3].shape[1]
+                    if num_parts == 0:
+                        continue
+                    object_name = anns[0, object_id][0][0]
+                    if object_name not in ["car", "horse"]:
+                        continue
+                    object_mask = anns[0, object_id][2]
+                    x_min, x_max, y_min, y_max = get_bbox_data(object_mask)
+                    width, height = (x_max - x_min), (y_max - y_min)
+                    object_bbox_size = width * height
+                    if object_bbox_size < object_size_thresh[object_name]:
+                        continue
+                    object_bbox_mask = np.zeros_like(object_mask)
+                    object_bbox_mask[y_min:y_max, x_min:x_max] = 1
+                    object_bbox_masks.append(object_bbox_mask)
+                if len(object_bbox_masks) > 0:
+                    object_bbox_masks = np.stack(object_bbox_masks, axis=0)
+                    object_bbox_masks = np.reshape(object_bbox_masks, (object_bbox_masks.shape[0], -1))
+                    intersection = object_bbox_masks @ object_bbox_masks.T
+                    a = np.stack(
+                        [np.sum(object_bbox_masks, axis=1), np.ones(object_bbox_masks.shape[0])],
+                        axis=1)
+                    b = np.concatenate([np.ones((1, object_bbox_masks.shape[0])),
+                                   np.sum(object_bbox_masks, axis=1)[None, ...]], axis=0)
+                    union = a @ b
+                    iou = (intersection / (union - intersection + 1e-7))
+                    ys, xs = np.where(np.triu(iou, 1) >= object_overlapping_threshold)
+                    object_ids_to_remove += np.concatenate([ys, xs]).tolist()
+            if len(object_ids_to_remove) > 0:
+                print(object_ids_to_remove)
             for object_id in range(num_objects):
+                if object_id in object_ids_to_remove:
+                    continue
                 num_parts = anns[0, object_id][3].shape[1]
                 if num_parts == 0:
                     continue
@@ -186,6 +222,9 @@ class PascalVOCPartDataset(Dataset):
     def set_train(self, train):
         self.train = train
 
+    def set_fill_background_with_black(self, fill_background_with_black):
+        self.fill_background_with_black = fill_background_with_black
+
     def __getitem__(self, idx):
         if self.train:
             idx = self.train_data_id
@@ -247,6 +286,8 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
             train_data_id: int = 2,
             mask_size: int = 256,
             fill_background_with_black: bool = False,
+            remove_overlapping_objects: bool = False,
+            object_overlapping_threshold: float = 0.05,
     ):
         super().__init__()
         self.annotations_files_dir = annotations_files_dir
@@ -260,12 +301,16 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
         self.train_data_id = train_data_id
         self.mask_size = mask_size
         self.fill_background_with_black = fill_background_with_black
+        self.remove_overlapping_objects = remove_overlapping_objects
+        self.object_overlapping_threshold = object_overlapping_threshold
 
     def setup(self, stage: str):
         self.train_dataset = PascalVOCPartDataset(
             ann_file_names=os.listdir(self.annotations_files_dir),
             mask_size=self.mask_size,
-            fill_background_with_black=self.fill_background_with_black,
+            fill_background_with_black=False,
+            remove_overlapping_objects=self.remove_overlapping_objects,
+            object_overlapping_threshold=self.object_overlapping_threshold,
         )
         self.train_dataset.setup(self.object_name, self.part_name)
         self.test_dataset = deepcopy(self.train_dataset)
@@ -279,6 +324,7 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
         self.test_dataset.set_crop_ratio(self.test_crop_ratio)
         self.test_dataset.set_num_crops(self.test_num_crops)
         self.test_dataset.set_train(False)
+        self.test_dataset.set_fill_background_with_black(self.fill_background_with_black)
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=1, shuffle=True)

@@ -38,6 +38,8 @@ def main():
             train_data_id=config.train_data_id,
             mask_size=config.mask_size,
             fill_background_with_black=config.fill_background_with_black,
+            remove_overlapping_objects=config.remove_overlapping_objects,
+            object_overlapping_threshold=config.object_overlapping_threshold,
         )
     model = CoSegmenterTrainer(config=config)
     trainer = pl.Trainer(

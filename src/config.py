@@ -15,12 +15,12 @@ class Config:
         self.batch_size = 1
         self.gpu_id = [0]
         self.second_gpu_id = 2
-        self.train = False
+        self.train = True
         self.num_pixels_to_show = 512*512
         self.dataset = "pascal"  # ["sample", "pascal"]
 
         self.object_name = "car"
-        self.part_name = "window"
+        self.part_name = "wheel"
         self.train_num_crops = 10
         self.test_num_crops = 1
         self.train_crop_ratio = 0.93
@@ -31,3 +31,5 @@ class Config:
         self.use_crf = False
         self.fill_background_with_black = True
         self.threshold = 0.3
+        self.remove_overlapping_objects = True
+        self.object_overlapping_threshold = 0.05
