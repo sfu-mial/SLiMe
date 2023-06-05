@@ -108,13 +108,14 @@ class PascalVOCPartDataset(Dataset):
         self.part_names = None
         self.current_idx = None
         self.object_part_data = []
-        counter_ = 0
+        # counter_ = 0
         progress_bar = tqdm(ann_file_names)
         progress_bar.set_description("preparing the data...")
         for ann_file_name in progress_bar:
             ann_file_path, img_file_path = get_file_dirs(ann_file_name)
             anns = io.loadmat(ann_file_path)['anno'][0, 0][1]
             num_objects = anns.shape[1]
+            file_part_data = {}
             for object_id in range(num_objects):
                 num_parts = anns[0, object_id][3].shape[1]
                 if num_parts == 0:
@@ -128,38 +129,48 @@ class PascalVOCPartDataset(Dataset):
                 object_bbox_size = width * height
                 if object_bbox_size < object_size_thresh[object_name]:
                     continue
+                object_part_data = file_part_data.get(object_name, {})
+                # object_data = self.data.get(object_name, {})
 
-                object_data = self.data.get(object_name, {})
-                aux_part_data = {}
                 for part_id in range(num_parts):
-                    part_name = anns[0, object_id][3][0][part_id][0][0]
-                    aux_data = aux_part_data.get(part_mapping[part_name], [])
-                    aux_data.append(part_id)
-                    aux_part_data[part_mapping[part_name]] = aux_data
+                    part_name = part_mapping[anns[0, object_id][3][0][part_id][0][0]]
+                    aux_data = object_part_data.get(part_name, [])
+                    aux_data.append([object_id, part_id])
+                    object_part_data[part_name] = aux_data
+                file_part_data[object_name] = object_part_data
+                # m_h, m_w = object_mask.shape
+                # if width < height:
+                #     x_min, x_max = adjust_bbox_coords(height, width, x_min, x_max, m_w)
 
-                m_h, m_w = object_mask.shape
-                if width < height:
-                    x_min, x_max = adjust_bbox_coords(height, width, x_min, x_max, m_w)
+                # elif width > height:
+                #     y_min, y_max = adjust_bbox_coords(width, height, y_min, y_max, m_h)
 
-                elif width > height:
-                    y_min, y_max = adjust_bbox_coords(width, height, y_min, y_max, m_h)
+                # if x_min < 0 or y_min < 0:
+                #     counter_ += 1
+                #     x_min = max(0, x_min)
+                #     y_min = max(0, y_min)
 
-                if x_min < 0 or y_min < 0:
-                    counter_ += 1
-                    x_min = max(0, x_min)
-                    y_min = max(0, y_min)
-
-                for part_name in aux_part_data.keys():
-                    part_data = object_data.get(part_name, [])
+                # for part_name in aux_part_data.keys():
+                #     part_data = object_data.get(part_name, [])
+                #     part_data.append({
+                #         "file_name": ann_file_name,
+                #         "object_id": object_id,
+                #         "part_ids": aux_part_data[part_name],
+                #         "bbox": [x_min, y_min, x_max, y_max],
+                #     })
+                # object_data[part_name] = part_data
+                # self.data[object_name] = object_data
+            for object_name in file_part_data:
+                object_part_data = self.data.get(object_name, {})
+                for part_name in file_part_data[object_name]:
+                    part_data = object_part_data.get(part_name, [])
                     part_data.append({
                         "file_name": ann_file_name,
-                        "object_id": object_id,
-                        "part_ids": aux_part_data[part_name],
-                        "bbox": [x_min, y_min, x_max, y_max],
+                        "object_part_ids": file_part_data[object_name][part_name],
                     })
-                object_data[part_name] = part_data
-                self.data[object_name] = object_data
-        print("number of images with changed aspect ratio: ", counter_)
+                    object_part_data[part_name] = part_data
+                self.data[object_name] = object_part_data
+        # print("number of images with changed aspect ratio: ", counter_)
 
     def get_object_names(self):
         return sorted(list(self.data.keys()))
@@ -197,17 +208,17 @@ class PascalVOCPartDataset(Dataset):
             idx = self.current_idx
 
         data = self.object_part_data[idx]
-        file_name, object_id, part_ids, bbox = data["file_name"], data["object_id"], data["part_ids"], data["bbox"]
+        file_name, object_part_ids = data["file_name"], data["object_part_ids"]
         ann_file_path, img_file_path = get_file_dirs(file_name)
         image = Image.open(img_file_path)
         data = io.loadmat(ann_file_path)
         anns = data['anno'][0, 0][1]
         mask = 0
-        for part_id in part_ids:
+        for (object_id, part_id) in object_part_ids:
             mask += anns[0, object_id][3][0][part_id][1]
         mask = np.where(mask > 0, 1, 0)
-        mask = mask[bbox[1]:bbox[3], bbox[0]:bbox[2]]
-        image = image.crop(bbox)
+        # mask = mask[bbox[1]:bbox[3], bbox[0]:bbox[2]]
+        # image = image.crop(bbox)
         image = transforms.functional.resize(image, (int(512/self.crop_ratio), int(512/self.crop_ratio)))
         mask = transforms.functional.resize(Image.fromarray((mask * 255).astype(np.uint8)), (int(512/self.crop_ratio), int(512/self.crop_ratio)))
         y, x, h, w = transforms.RandomCrop.get_params(image, output_size=(512, 512))
@@ -257,7 +268,7 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
 
     def setup(self, stage: str):
         self.train_dataset = PascalVOCPartDataset(
-            ann_file_names=os.listdir(self.annotations_files_dir)[:100],
+            ann_file_names=os.listdir(self.annotations_files_dir),
             mask_size=self.mask_size,
         )
         self.train_dataset.setup(self.object_name, self.part_name)

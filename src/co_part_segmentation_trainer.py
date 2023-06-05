@@ -201,12 +201,15 @@ class CoSegmenterTrainer(pl.LightningModule):
             self.final_prediction1 /= self.aux_final_prediction1
             self.final_prediction2 /= self.aux_final_prediction2
 
-            binarized_attention_map1 = torch.where(
-                self.final_prediction1 > torch.mean(self.final_prediction1) + 1 * torch.std(self.final_prediction1), 1,
-                0)
-            binarized_attention_map2 = torch.where(
-                self.final_prediction2 > torch.mean(self.final_prediction2) + 1 * torch.std(self.final_prediction2), 1,
-                0)
+            binarized_attention_map1 = torch.where(self.final_prediction1 > 0.2, 1, 0)
+            binarized_attention_map2 = torch.where(self.final_prediction2 > 0.2, 1, 0)
+
+            # binarized_attention_map1 = torch.where(
+            #     self.final_prediction1 > torch.mean(self.final_prediction1) + 1 * torch.std(self.final_prediction1), 1,
+            #     0)
+            # binarized_attention_map2 = torch.where(
+            #     self.final_prediction2 > torch.mean(self.final_prediction2) + 1 * torch.std(self.final_prediction2), 1,
+            #     0)
 
             # binarized_attention_map1 = torch.where(
             #     self.final_prediction1 > (self.final_prediction1.min() + self.final_prediction1.max()) / 2, 1, 0)
