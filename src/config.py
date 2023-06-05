@@ -14,6 +14,7 @@ class Config:
         self.epochs = 40
         self.batch_size = 1
         self.gpu_id = [0]
+        self.second_gpu_id = 1
         self.train = False
         self.num_pixels_to_show = 512*512
         self.dataset = "pascal"  # ["sample", "pascal"]
@@ -27,3 +28,4 @@ class Config:
         self.train_data_id = 2
 
         self.mask_size = 256
+        self.use_crf = False
