@@ -1,8 +1,8 @@
 import pytorch_lightning as pl
-from pytorch_lightning.callbacks import LearningRateMonitor
 
 from src.config import Config
-from src.dataset import SampleDataModule
+from src.datasets.sample_dataset import SampleDataModule
+from src.datasets.pascal_voc_part_dataset import PascalVOCPartDataModule
 from src.co_part_segmentation_trainer import (
     CoSegmenterTrainer,
 )
@@ -11,17 +11,33 @@ from src.co_part_segmentation_trainer import (
 def main():
     # torch.manual_seed(42)
     config = Config()
-
-    dm = SampleDataModule(
-        src_image_dir=config.src_image_path,
-        target_image_dir=config.target_image_path,
-        src_segmentation_dir=config.src_segmentation_path,
-        location1=config.point_location1,
-        location2=config.point_location2,
-        num_crops=config.num_crops,
-        batch_size=config.batch_size,
-        crop_ratio=config.crop_ratio
-    )
+    if config.dataset == "sample":
+        dm = SampleDataModule(
+            src_image_dir=config.src_image_path,
+            target_image_dir=config.target_image_path,
+            src_segmentation_dir=config.src_segmentation_path,
+            location1=config.point_location1,
+            location2=config.point_location2,
+            train_num_crops=config.train_num_crops,
+            test_num_crops=config.test_num_crops,
+            batch_size=config.batch_size,
+            train_crop_ratio=config.train_crop_ratio,
+            test_crop_ratio=config.test_crop_ratio,
+            mask_size=config.mask_size,
+        )
+    elif config.dataset == "pascal":
+        dm = PascalVOCPartDataModule(
+            annotations_files_dir=config.annotations_files_dir,
+            object_name=config.object_name,
+            part_name=config.part_name,
+            train_num_crops=config.train_num_crops,
+            test_num_crops=config.test_num_crops,
+            batch_size=config.batch_size,
+            train_crop_ratio=config.train_crop_ratio,
+            test_crop_ratio=config.test_crop_ratio,
+            train_data_id=config.train_data_id,
+            mask_size=config.mask_size,
+        )
     model = CoSegmenterTrainer(config=config)
     trainer = pl.Trainer(
         accelerator="gpu",
@@ -31,7 +47,7 @@ def main():
         devices=config.gpu_id,
         # precision=16,
         log_every_n_steps=1,
-        accumulate_grad_batches=config.num_crops//config.batch_size,
+        accumulate_grad_batches=config.train_num_crops//config.batch_size,
         enable_checkpointing=False
     )
     if config.train:
