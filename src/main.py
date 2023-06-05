@@ -37,6 +37,7 @@ def main():
             test_crop_ratio=config.test_crop_ratio,
             train_data_id=config.train_data_id,
             mask_size=config.mask_size,
+            fill_background_with_black=config.fill_background_with_black,
         )
     model = CoSegmenterTrainer(config=config)
     trainer = pl.Trainer(

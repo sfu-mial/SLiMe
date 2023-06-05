@@ -94,12 +94,13 @@ def adjust_bbox_coords(long_side_length, short_side_length, short_side_coord_min
 
 
 class PascalVOCPartDataset(Dataset):
-    def __init__(self, ann_file_names, object_size_thresh={"car": 50 * 50, "horse": 32 * 32}, train=True, train_data_id=0, num_crops=1, mask_size=256):
+    def __init__(self, ann_file_names, object_size_thresh={"car": 50 * 50, "horse": 32 * 32}, train=True, train_data_id=0, num_crops=1, mask_size=256, fill_background_with_black=False):
         super().__init__()
         self.train = train
         self.train_data_id = train_data_id
         self.num_crops = num_crops
         self.mask_size = mask_size
+        self.fill_background_with_black = fill_background_with_black
         self.crop_ratio = None
         self.counter = 0
         self.dataset_len = None
@@ -202,6 +203,9 @@ class PascalVOCPartDataset(Dataset):
         image = Image.open(img_file_path)
         data = io.loadmat(ann_file_path)
         anns = data['anno'][0, 0][1]
+        if self.fill_background_with_black:
+            object_mask = anns[0, object_id][2]
+            image = Image.fromarray((np.array(image)*np.where(object_mask[..., None] > 0, 1, 0)).astype(np.uint8))
         mask = 0
         for part_id in part_ids:
             mask += anns[0, object_id][3][0][part_id][1]
@@ -242,6 +246,7 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
             test_crop_ratio: float = 1.,
             train_data_id: int = 2,
             mask_size: int = 256,
+            fill_background_with_black: bool = False,
     ):
         super().__init__()
         self.annotations_files_dir = annotations_files_dir
@@ -254,11 +259,13 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
         self.test_crop_ratio = test_crop_ratio
         self.train_data_id = train_data_id
         self.mask_size = mask_size
+        self.fill_background_with_black = fill_background_with_black
 
     def setup(self, stage: str):
         self.train_dataset = PascalVOCPartDataset(
             ann_file_names=os.listdir(self.annotations_files_dir),
             mask_size=self.mask_size,
+            fill_background_with_black=self.fill_background_with_black,
         )
         self.train_dataset.setup(self.object_name, self.part_name)
         self.test_dataset = deepcopy(self.train_dataset)

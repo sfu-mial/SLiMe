@@ -29,4 +29,5 @@ class Config:
 
         self.mask_size = 256
         self.use_crf = False
+        self.fill_background_with_black = True
         self.threshold = 0.3
