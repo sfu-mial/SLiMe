@@ -200,21 +200,19 @@ class CoSegmenterTrainer(pl.LightningModule):
         if self.test_counter == self.config.test_num_crops:
             self.final_prediction1 /= self.aux_final_prediction1
             self.final_prediction2 /= self.aux_final_prediction2
+            if self.config.threshold == "mean+std":
+                binarized_attention_map1 = torch.where(
+                    self.final_prediction1 > torch.mean(self.final_prediction1) + 1 * torch.std(self.final_prediction1),
+                    1,
+                    0)
+                binarized_attention_map2 = torch.where(
+                    self.final_prediction2 > torch.mean(self.final_prediction2) + 1 * torch.std(self.final_prediction2),
+                    1,
+                    0)
+            elif isinstance(self.config.threshold, float):
+                binarized_attention_map1 = torch.where(self.final_prediction1 > self.config.threshold, 1., 0.)
+                binarized_attention_map2 = torch.where(self.final_prediction2 > self.config.threshold, 1., 0.)
 
-            binarized_attention_map1 = torch.where(self.final_prediction1 > 0.2, 1., 0.)
-            binarized_attention_map2 = torch.where(self.final_prediction2 > 0.2, 1., 0.)
-
-            # binarized_attention_map1 = torch.where(
-            #     self.final_prediction1 > torch.mean(self.final_prediction1) + 1 * torch.std(self.final_prediction1), 1,
-            #     0)
-            # binarized_attention_map2 = torch.where(
-            #     self.final_prediction2 > torch.mean(self.final_prediction2) + 1 * torch.std(self.final_prediction2), 1,
-            #     0)
-
-            # binarized_attention_map1 = torch.where(
-            #     self.final_prediction1 > (self.final_prediction1.min() + self.final_prediction1.max()) / 2, 1, 0)
-            # binarized_attention_map2 = torch.where(
-            #     self.final_prediction2 > (self.final_prediction2.min() + self.final_prediction2.max()) / 2, 1, 0)
             if self.config.use_crf:
                 crf_mask = torch.as_tensor(
                     crf((target_images_original.permute(1, 2, 0) * 255).type(torch.uint8).cpu().numpy().copy(order='C'),
