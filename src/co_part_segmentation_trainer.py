@@ -153,7 +153,9 @@ class CoSegmenterTrainer(pl.LightningModule):
     def test_step(self, batch, batch_idx):
         target_images, crop_start_y, crop_start_x, mask_original, target_images_original = batch
         target_images_original = target_images_original[0]
-        mask_original = mask_original[0]
+        mask_provided = not torch.all(mask_original == 0)
+        if mask_provided:
+            mask_original = mask_original[0]
 
         with torch.no_grad():
             loss, raw_attention_maps = self.stable_diffusion.train_step(
@@ -212,27 +214,27 @@ class CoSegmenterTrainer(pl.LightningModule):
             elif isinstance(self.config.threshold, float):
                 binarized_attention_map1 = torch.where(self.final_prediction1 > self.config.threshold, 1., 0.)
                 binarized_attention_map2 = torch.where(self.final_prediction2 > self.config.threshold, 1., 0.)
-
-            if self.config.use_crf:
-                crf_mask = torch.as_tensor(
-                    crf((target_images_original.permute(1, 2, 0) * 255).type(torch.uint8).cpu().numpy().copy(order='C'),
-                        torch.stack([binarized_attention_map1, binarized_attention_map1, binarized_attention_map1],
-                                    dim=2).type(torch.float).numpy()))[:, :, 0]
-                crf_masked_image_grid1 = torchvision.utils.make_grid(
-                    target_images_original.cpu() * (1 - crf_mask[None, ...]).cpu() + crf_mask[None, ...])
-                intersection = (torch.nn.functional.interpolate(crf_mask[None, None, ...],
-                                                                self.config.mask_size)[0, 0] > 0).type(torch.uint8) * (
+            if mask_provided:
+                if self.config.use_crf:
+                    crf_mask = torch.as_tensor(
+                        crf((target_images_original.permute(1, 2, 0) * 255).type(torch.uint8).cpu().numpy().copy(order='C'),
+                            torch.stack([binarized_attention_map1, binarized_attention_map1, binarized_attention_map1],
+                                        dim=2).type(torch.float).numpy()))[:, :, 0]
+                    crf_masked_image_grid1 = torchvision.utils.make_grid(
+                        target_images_original.cpu() * (1 - crf_mask[None, ...]).cpu() + crf_mask[None, ...])
+                    intersection = (torch.nn.functional.interpolate(crf_mask[None, None, ...],
+                                                                    self.config.mask_size)[0, 0] > 0).type(torch.uint8) * (
                                            mask_original.cpu() > 0).type(torch.uint8)
-                union = (torch.nn.functional.interpolate(crf_mask[None, None, ...],
-                                                         self.config.mask_size)[0, 0] > 0).type(torch.uint8) + (
+                    union = (torch.nn.functional.interpolate(crf_mask[None, None, ...],
+                                                             self.config.mask_size)[0, 0] > 0).type(torch.uint8) + (
                                     mask_original.cpu() > 0).type(torch.uint8) - intersection
-            else:
-                intersection = (torch.nn.functional.interpolate(binarized_attention_map1[None, None, ...], self.config.mask_size)[0, 0]>0).type(torch.uint8) * (mask_original.cpu()>0).type(torch.uint8)
-                union = (torch.nn.functional.interpolate(binarized_attention_map1[None, None, ...], self.config.mask_size)[0, 0]>0).type(torch.uint8) + (mask_original.cpu()>0).type(torch.uint8) - intersection
-            iou = intersection.sum() / (union.sum()+1e-7)
-            images_grid = torchvision.utils.make_grid(target_images_original)
+                else:
+                    intersection = (torch.nn.functional.interpolate(binarized_attention_map1[None, None, ...], self.config.mask_size)[0, 0]>0).type(torch.uint8) * (mask_original.cpu()>0).type(torch.uint8)
+                    union = (torch.nn.functional.interpolate(binarized_attention_map1[None, None, ...], self.config.mask_size)[0, 0]>0).type(torch.uint8) + (mask_original.cpu()>0).type(torch.uint8) - intersection
+                iou = intersection.sum() / (union.sum()+1e-7)
+                masks_grid = torchvision.utils.make_grid(mask_original[None, ...])
 
-            masks_grid = torchvision.utils.make_grid(mask_original[None, ...])
+            images_grid = torchvision.utils.make_grid(target_images_original)
 
             masked_image_grid1 = torchvision.utils.make_grid(
                 target_images_original.cpu() * (1 - binarized_attention_map1[None, ...]).cpu() + torch.stack(
@@ -247,15 +249,17 @@ class CoSegmenterTrainer(pl.LightningModule):
             log_id = batch_idx // self.config.test_num_crops
 
             self.logger.experiment.add_image("test image", images_grid, log_id)
-            self.logger.experiment.add_image("test mask", masks_grid, log_id)
-            if self.config.use_crf:
-                self.logger.experiment.add_image("test grid masked image1", crf_masked_image_grid1, log_id)
+
+            if mask_provided:
+                self.logger.experiment.add_image("test mask", masks_grid, log_id)
+                self.log("test iou", iou, on_step=True, sync_dist=True)
+                if self.config.use_crf:
+                    self.logger.experiment.add_image("test crf masked image1", crf_masked_image_grid1, log_id)
+
             self.logger.experiment.add_image("test masked image1", masked_image_grid1, log_id)
             self.logger.experiment.add_image("test masked image2", masked_image_grid2, log_id)
             self.logger.experiment.add_image("test attention maps1", attention_grid1, log_id)
             self.logger.experiment.add_image("test attention maps2", attention_grid2, log_id)
-
-            self.log("test iou", iou, on_step=True, sync_dist=True)
 
             self.final_prediction1 = 0
             self.final_prediction2 = 0
