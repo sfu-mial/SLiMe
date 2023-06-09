@@ -104,7 +104,7 @@ class SampleDataset(Dataset):
                 # cropped_segmentation = cv2.GaussianBlur(cropped_segmentation, (0, 0), sigmaX=3, sigmaY=3, borderType=cv2.BORDER_DEFAULT)
                 # cropped_segmentation = (cropped_segmentation - cropped_segmentation.min()) / (cropped_segmentation.max() - cropped_segmentation.min())
                 cropped_segmentation = transforms.functional.to_tensor(cropped_segmentation)[0].type(torch.float)
-                return cropped_image, cropped_segmentation / 10, cropped_segmentation / 10
+                return cropped_image, cropped_segmentation / 10, cropped_segmentation
         else:
             return cropped_image, y, x, 0, image
 
