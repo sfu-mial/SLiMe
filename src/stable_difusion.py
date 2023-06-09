@@ -13,12 +13,11 @@ from copy import deepcopy
 
 
 class StableDiffusion(nn.Module):
-    def __init__(self, sd_version='2.0', return_attentions=False, step_guidance=None, partial_run=False):
+    def __init__(self, sd_version='2.0', step_guidance=None, partial_run=False, attention_layers_to_use=[]):
         super().__init__()
 
         self.sd_version = sd_version
         self.step_guidance = step_guidance
-        self.return_attentions = return_attentions
         self.partial_run = partial_run
         print(f'[INFO] loading stable diffusion...')
 
@@ -65,40 +64,40 @@ class StableDiffusion(nn.Module):
         self.device1 = None
         print(f'[INFO] loaded stable diffusion!')
 
-        attention_modules = [
-            # 'down_blocks[0].attentions[0].transformer_blocks[0].attn1',
-            # 'down_blocks[0].attentions[0].transformer_blocks[0].attn2',
-            # 'down_blocks[0].attentions[1].transformer_blocks[0].attn1',
-            # 'down_blocks[0].attentions[1].transformer_blocks[0].attn2',
-            # 'down_blocks[1].attentions[0].transformer_blocks[0].attn1',
-            # 'down_blocks[1].attentions[0].transformer_blocks[0].attn2',
-            # 'down_blocks[1].attentions[1].transformer_blocks[0].attn1',
-            # 'down_blocks[1].attentions[1].transformer_blocks[0].attn2',
-            # 'down_blocks[2].attentions[0].transformer_blocks[0].attn1',
-            'down_blocks[2].attentions[0].transformer_blocks[0].attn2',  ##########
-            # 'down_blocks[2].attentions[1].transformer_blocks[0].attn1',
-            'down_blocks[2].attentions[1].transformer_blocks[0].attn2',  ##########
-            # 'up_blocks[1].attentions[0].transformer_blocks[0].attn1',
-            'up_blocks[1].attentions[0].transformer_blocks[0].attn2',  ##########
-            # 'up_blocks[1].attentions[1].transformer_blocks[0].attn1',
-            'up_blocks[1].attentions[1].transformer_blocks[0].attn2',  ##########
-            # 'up_blocks[1].attentions[2].transformer_blocks[0].attn1',
-            'up_blocks[1].attentions[2].transformer_blocks[0].attn2',  ##########
-            # 'up_blocks[2].attentions[0].transformer_blocks[0].attn1',
-            'up_blocks[2].attentions[0].transformer_blocks[0].attn2',  ##
-            # 'up_blocks[2].attentions[1].transformer_blocks[0].attn1',
-            'up_blocks[2].attentions[1].transformer_blocks[0].attn2',  ##
-            # 'up_blocks[2].attentions[2].transformer_blocks[0].attn1',
-            # 'up_blocks[2].attentions[2].transformer_blocks[0].attn2',
-            # 'up_blocks[3].attentions[0].transformer_blocks[0].attn1',
-            # 'up_blocks[3].attentions[0].transformer_blocks[0].attn2',
-            # 'up_blocks[3].attentions[1].transformer_blocks[0].attn1',
-            # 'up_blocks[3].attentions[1].transformer_blocks[0].attn2',
-            # 'up_blocks[3].attentions[2].transformer_blocks[0].attn1',
-            # 'up_blocks[3].attentions[2].transformer_blocks[0].attn2',
-            # 'mid_block.attentions[0].transformer_blocks[0].attn1',
-            # 'mid_block.attentions[0].transformer_blocks[0].attn2'
-        ]
+        # attention_modules = [
+        #     # 'down_blocks[0].attentions[0].transformer_blocks[0].attn1',
+        #     # 'down_blocks[0].attentions[0].transformer_blocks[0].attn2',
+        #     # 'down_blocks[0].attentions[1].transformer_blocks[0].attn1',
+        #     # 'down_blocks[0].attentions[1].transformer_blocks[0].attn2',
+        #     # 'down_blocks[1].attentions[0].transformer_blocks[0].attn1',
+        #     # 'down_blocks[1].attentions[0].transformer_blocks[0].attn2',
+        #     # 'down_blocks[1].attentions[1].transformer_blocks[0].attn1',
+        #     # 'down_blocks[1].attentions[1].transformer_blocks[0].attn2',
+        #     # 'down_blocks[2].attentions[0].transformer_blocks[0].attn1',
+        #     # 'down_blocks[2].attentions[0].transformer_blocks[0].attn2',  ##########
+        #     # 'down_blocks[2].attentions[1].transformer_blocks[0].attn1',
+        #     # 'down_blocks[2].attentions[1].transformer_blocks[0].attn2',  ##########
+        #     # 'up_blocks[1].attentions[0].transformer_blocks[0].attn1',
+        #     'up_blocks[1].attentions[0].transformer_blocks[0].attn2',  ########## +
+        #     # 'up_blocks[1].attentions[1].transformer_blocks[0].attn1',
+        #     'up_blocks[1].attentions[1].transformer_blocks[0].attn2',  ########## +
+        #     # 'up_blocks[1].attentions[2].transformer_blocks[0].attn1',
+        #     'up_blocks[1].attentions[2].transformer_blocks[0].attn2',  ########## +
+        #     # 'up_blocks[2].attentions[0].transformer_blocks[0].attn1',
+        #     'up_blocks[2].attentions[0].transformer_blocks[0].attn2',  #+
+        #     # 'up_blocks[2].attentions[1].transformer_blocks[0].attn1',
+        #     'up_blocks[2].attentions[1].transformer_blocks[0].attn2',  #+
+        #     # 'up_blocks[2].attentions[2].transformer_blocks[0].attn1',
+        #     'up_blocks[2].attentions[2].transformer_blocks[0].attn2',  #+ #-
+        #     # 'up_blocks[3].attentions[0].transformer_blocks[0].attn1',
+        #     # 'up_blocks[3].attentions[0].transformer_blocks[0].attn2', #-
+        #     # 'up_blocks[3].attentions[1].transformer_blocks[0].attn1',
+        #     # 'up_blocks[3].attentions[1].transformer_blocks[0].attn2',
+        #     # 'up_blocks[3].attentions[2].transformer_blocks[0].attn1',
+        #     # 'up_blocks[3].attentions[2].transformer_blocks[0].attn2',
+        #     # 'mid_block.attentions[0].transformer_blocks[0].attn1',
+        #     # 'mid_block.attentions[0].transformer_blocks[0].attn2'
+        # ]
 
         self.attention_maps = {}
         self.noise = None
@@ -118,10 +117,9 @@ class StableDiffusion(nn.Module):
 
             return hook
 
-        if return_attentions:
-            handles = []
-            for module in attention_modules:
-                handles.append(eval("self.unet." + module).register_forward_hook(create_nested_hook(module)))
+        handles = []
+        for module in attention_layers_to_use:
+            handles.append(eval("self.unet." + module).register_forward_hook(create_nested_hook(module)))
 
     def setup(self, device, device1=None):
         self.device1 = device if device1 is None else device1
