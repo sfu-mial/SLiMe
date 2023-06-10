@@ -4,4 +4,7 @@ cps_venv/
 diffusers/
 lightning_logs/
 checkpoints/version_0/optimized_text_embedding.pth
-Untitled.ipynb
+*.pth
+*.ipynb
+*.xml
+*.iml
