@@ -13,9 +13,9 @@ def main():
     config = Config()
     if config.dataset == "sample":
         dm = SampleDataModule(
-            src_image_dir=config.src_image_path,
+            src_image_dirs=config.src_image_paths,
             target_image_dir=config.target_image_path,
-            src_segmentation_dir=config.src_segmentation_path,
+            src_segmentation_dirs=config.src_segmentation_paths,
             location1=config.point_location1,
             location2=config.point_location2,
             train_num_crops=config.train_num_crops,
