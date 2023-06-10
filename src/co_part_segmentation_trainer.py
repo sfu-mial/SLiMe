@@ -11,6 +11,17 @@ from src.crf import crf
 from src.stable_difusion import StableDiffusion
 
 
+def adjust_bbox_coords(long_side_length, short_side_length, short_side_coord_min, short_side_coord_max, short_side_original_length):
+    margin = (long_side_length - short_side_length) / 2
+    short_side_coord_min -= math.ceil(margin)
+    short_side_coord_max += math.floor(margin)
+    short_side_coord_max -= min(0, short_side_coord_min)
+    short_side_coord_min = max(0, short_side_coord_min)
+    short_side_coord_min += min(short_side_original_length - short_side_coord_max, 0)
+    short_side_coord_max = min(short_side_original_length, short_side_coord_max)
+
+    return short_side_coord_min, short_side_coord_max
+
 class CoSegmenterTrainer(pl.LightningModule):
     def __init__(self, config: Config, learning_rate=0.001):
         super().__init__()
@@ -20,7 +31,7 @@ class CoSegmenterTrainer(pl.LightningModule):
         self.save_hyperparameters(config.__dict__)
         self.learning_rate = learning_rate
         self.automatic_optimization = True
-        self.stable_diffusion = StableDiffusion(sd_version='1.4', return_attentions=True, partial_run=False)
+        self.stable_diffusion = StableDiffusion(sd_version='1.4', partial_run=False, attention_layers_to_use=config.attention_layers_to_use)
 
         self.target_image_original = None
         self.final_prediction1 = 0
@@ -51,36 +62,58 @@ class CoSegmenterTrainer(pl.LightningModule):
     def on_test_start(self) -> None:
         self.stable_diffusion.setup(self.device, torch.device(f"cuda:{self.config.second_gpu_id}"))
 
-    def get_attention_map(self, raw_attention_maps, output_size=256, token_id=2):
+    def get_attention_map(self, raw_attention_maps, output_size=256, token_id=2, use_softmax=True):
         all_processed_attention_maps1 = []
         all_processed_attention_maps2 = []
         for layer in raw_attention_maps:
+            # if layer.startswith("up_blocks[1]"):
             channel, img_embed_len, text_embed_len = raw_attention_maps[layer].chunk(2)[1].shape
-            reshaped_attention_map = raw_attention_maps[layer].chunk(2)[1].softmax(dim=-1)[:, :, token_id].reshape(
-                channel,
-                1,
-                int(math.sqrt(img_embed_len)),
-                int(math.sqrt(img_embed_len)),
-            )
+            if use_softmax:
+                reshaped_attention_map = raw_attention_maps[layer].chunk(2)[1].softmax(dim=-1)[:, :, token_id].reshape(
+                    channel,
+                    1,
+                    int(math.sqrt(img_embed_len)),
+                    int(math.sqrt(img_embed_len)),
+                )
+            else:
+                reshaped_attention_map = raw_attention_maps[layer].chunk(2)[1][:, :, token_id].reshape(
+                    channel,
+                    1,
+                    int(math.sqrt(img_embed_len)),
+                    int(math.sqrt(img_embed_len)),
+                )
             resized_attention_maps1 = \
             torch.nn.functional.interpolate(reshaped_attention_map, size=output_size,
                                             mode='bilinear').mean(dim=0)[0]
-
-            channel, img_embed_len, text_embed_len = raw_attention_maps[layer].chunk(2)[0].shape
-            reshaped_attention_map = raw_attention_maps[layer].chunk(2)[0].softmax(dim=-1)[:, :, token_id].reshape(
-                channel,
-                1,
-                int(math.sqrt(img_embed_len)),
-                int(math.sqrt(img_embed_len)),
-            )
-            resized_attention_maps2 = \
-            torch.nn.functional.interpolate(reshaped_attention_map, size=output_size,
-                                            mode='bilinear').mean(dim=0)[0]
             all_processed_attention_maps1.append(resized_attention_maps1)
-            all_processed_attention_maps2.append(resized_attention_maps2)
+
+            if layer.startswith("up_blocks[2]"):
+                channel, img_embed_len, text_embed_len = raw_attention_maps[layer].chunk(2)[0].shape
+                if use_softmax:
+                    reshaped_attention_map = raw_attention_maps[layer].chunk(2)[0].softmax(dim=-1)[:, :, token_id].reshape(
+                        channel,
+                        1,
+                        int(math.sqrt(img_embed_len)),
+                        int(math.sqrt(img_embed_len)),
+                    )
+                else:
+                    reshaped_attention_map = raw_attention_maps[layer].chunk(2)[0][:, :, token_id].reshape(
+                        channel,
+                        1,
+                        int(math.sqrt(img_embed_len)),
+                        int(math.sqrt(img_embed_len)),
+                    )
+                resized_attention_maps2 = \
+                torch.nn.functional.interpolate(reshaped_attention_map, size=output_size,
+                                                mode='bilinear').mean(dim=0)[0]
+
+                all_processed_attention_maps2.append(resized_attention_maps2)
 
         sd_attention_maps1 = torch.stack(all_processed_attention_maps1, dim=0).mean(dim=0)
         sd_attention_maps2 = torch.stack(all_processed_attention_maps2, dim=0).mean(dim=0)
+        if not use_softmax:
+            sd_attention_maps1 = torch.sigmoid(sd_attention_maps1)
+            sd_attention_maps2 = torch.sigmoid(sd_attention_maps2)
 
         return sd_attention_maps1.to(self.device), sd_attention_maps2.to(self.device)
 
@@ -94,13 +127,14 @@ class CoSegmenterTrainer(pl.LightningModule):
 
         loss, raw_attention_maps = self.stable_diffusion.train_step(
             torch.repeat_interleave(torch.cat([self.uncond_embedding, self.text_embedding]), self.config.batch_size, 0),
-            src_images, t=torch.tensor(10),
+            src_images, t=torch.tensor(260),
             back_propagate_loss=False, generate_new_noise=self.generate_noise)
         self.generate_noise = False
         sd_attention_maps1, sd_attention_maps2 = self.get_attention_map(
             raw_attention_maps=raw_attention_maps,
             output_size=self.config.mask_size,
             token_id=2,
+            use_softmax=self.config.train_use_softmax,
         )
 
         loss1 = torch.nn.functional.mse_loss(sd_attention_maps1, mask1)
@@ -108,10 +142,10 @@ class CoSegmenterTrainer(pl.LightningModule):
 
         if loss1 < self.min_loss_1:
             self.min_loss_1 = loss1
-            torch.save(self.text_embedding, os.path.join(self.config.base_dir, "optimized_text_embedding_1.pth"))
+            torch.save(self.text_embedding, os.path.join(self.config.checkpoint_dir, "optimized_text_embedding_1.pth"))
         if loss2 < self.min_loss_2:
             self.min_loss_2 = loss2
-            torch.save(self.uncond_embedding, os.path.join(self.config.base_dir, "optimized_text_embedding_2.pth"))
+            torch.save(self.uncond_embedding, os.path.join(self.config.checkpoint_dir, "optimized_text_embedding_2.pth"))
 
         loss = loss1 + loss2
 
@@ -132,14 +166,14 @@ class CoSegmenterTrainer(pl.LightningModule):
         self.logger.experiment.add_image("train image", images_grid, 0)
         self.logger.experiment.add_image("train sd attention maps1", sd_attention_maps_grid1, self.counter)
         self.logger.experiment.add_image("train sd attention maps2", sd_attention_maps_grid2, self.counter)
-        self.logger.experiment.add_image("train mask1", mask1_grid, 0)
-        self.logger.experiment.add_image("train mask2", mask2_grid, 0)
+        self.logger.experiment.add_image("train mask1", mask1_grid, self.counter)
+        self.logger.experiment.add_image("train mask2", mask2_grid, self.counter)
         self.counter += 1
 
         return loss
 
     def on_train_end(self) -> None:
-        torch.save(self.stable_diffusion.noise, os.path.join(self.config.base_dir, "noise.pth"))
+        torch.save(self.stable_diffusion.noise, os.path.join(self.config.checkpoint_dir, "noise.pth"))
 
     def on_test_epoch_start(self) -> None:
         self.text_embedding = torch.load(os.path.join(self.config.checkpoint_dir, "optimized_text_embedding_1.pth")).to(
@@ -165,6 +199,7 @@ class CoSegmenterTrainer(pl.LightningModule):
             raw_attention_maps=raw_attention_maps,
             output_size=512,
             token_id=2,
+            use_softmax=self.config.test_use_softmax,
         )
         sd_attention_maps1 = (sd_attention_maps1 - sd_attention_maps1.min()) / (
                 sd_attention_maps1.max() - sd_attention_maps1.min())
@@ -202,18 +237,85 @@ class CoSegmenterTrainer(pl.LightningModule):
         if self.test_counter == self.config.test_num_crops:
             self.final_prediction1 /= self.aux_final_prediction1
             self.final_prediction2 /= self.aux_final_prediction2
-            if self.config.threshold == "mean+std":
+            final_prediction3 = (self.final_prediction1 + self.final_prediction2) / 2
+            if self.config.threshold1 == "mean+std":
                 binarized_attention_map1 = torch.where(
                     self.final_prediction1 > torch.mean(self.final_prediction1) + 1 * torch.std(self.final_prediction1),
                     1,
                     0)
+            elif isinstance(self.config.threshold1, float):
+                binarized_attention_map1 = torch.where(self.final_prediction1 > self.config.threshold1, 1., 0.)
+                binarized_attention_map3 = torch.where(final_prediction3 > self.config.threshold1, 1., 0.)
+            if self.config.threshold2 == "mean+std":
                 binarized_attention_map2 = torch.where(
                     self.final_prediction2 > torch.mean(self.final_prediction2) + 1 * torch.std(self.final_prediction2),
                     1,
                     0)
-            elif isinstance(self.config.threshold, float):
-                binarized_attention_map1 = torch.where(self.final_prediction1 > self.config.threshold, 1., 0.)
-                binarized_attention_map2 = torch.where(self.final_prediction2 > self.config.threshold, 1., 0.)
+            elif isinstance(self.config.threshold2, float):
+                binarized_attention_map2 = torch.where(self.final_prediction2 > self.config.threshold2, 1., 0.)
+            ys, xs = torch.where(binarized_attention_map1 == 1)
+            x_start, x_end, y_start, y_end = xs.min(), xs.max(), ys.min(), ys.max()
+            w, h = x_end - x_start, y_end - y_start
+            if w < h:
+                diff = max(512 // 4, h) - h
+                offset_start, offset_end = math.ceil(diff / 2), math.floor(diff / 2)
+                if y_start - math.ceil(diff / 2) < 0:
+                    offset_end -= y_start - math.ceil(diff / 2)
+                    offset_start = y_start
+                elif y_end + math.floor(diff / 2) > 511:
+                    offset_start += y_end + math.floor(diff / 2) - 511
+                    offset_end = 511 - y_end
+                y_start -= offset_start
+                y_end += offset_end
+
+            elif h < w:
+                diff = max(512 // 4, w) - w
+                offset_start, offset_end = math.ceil(diff / 2), math.floor(diff / 2)
+                if x_start - diff // 2 < 0:
+                    offset_end -= x_start - diff // 2
+                    offset_start = x_start
+                elif x_end + math.floor(diff / 2) > 511:
+                    offset_start += x_end + math.floor(diff / 2) - 511
+                    offset_end = 511 - x_end
+                x_start -= offset_start
+                x_end += offset_end
+
+            w, h = x_end - x_start, y_end - y_start
+            if w > h:
+                y_start, y_end = adjust_bbox_coords(w, h, y_start, y_end, 512)
+            elif w < h:
+                x_start, x_end = adjust_bbox_coords(h, w, x_start, x_end, 512)
+            crop_size = max(h, w)
+            target_images = target_images[:, :, y_start:y_end, x_start:x_end]
+            target_images = torch.nn.functional.interpolate(target_images, 512, mode="bilinear")
+            with torch.no_grad():
+                loss, raw_attention_maps = self.stable_diffusion.train_step(
+                    torch.cat([self.uncond_embedding, self.text_embedding], dim=0), target_images,
+                    t=torch.tensor(160), back_propagate_loss=False, generate_new_noise=False)
+            sd_attention_maps1, sd_attention_maps2 = self.get_attention_map(
+                raw_attention_maps=raw_attention_maps,
+                output_size=512,
+                token_id=2,
+                use_softmax=self.config.test_use_softmax,
+            )
+            sd_attention_maps1, sd_attention_maps2 = torch.nn.functional.interpolate(sd_attention_maps1[None, None, ...], crop_size, mode="bilinear")[0, 0], torch.nn.functional.interpolate(sd_attention_maps2[None, None, ...], crop_size, mode="bilinear")[0, 0]
+
+            sd_attention_maps1 = (sd_attention_maps1 - sd_attention_maps1.min()) / (
+                    sd_attention_maps1.max() - sd_attention_maps1.min())
+            sd_attention_maps2 = (sd_attention_maps2 - sd_attention_maps2.min()) / (
+                    sd_attention_maps2.max() - sd_attention_maps2.min())
+
+            original_size_attention_map1 = torch.zeros(512, 512)
+
+            original_size_attention_map1[y_start: y_end, x_start: x_end] = sd_attention_maps1
+
+            original_size_attention_map2 = torch.zeros(512, 512)
+
+            original_size_attention_map2[y_start: y_end, x_start: x_end] = sd_attention_maps2
+
+            new_binarized_attention_map1 = torch.where(original_size_attention_map1 > self.config.threshold1, 1., 0.)
+            new_binarized_attention_map2 = torch.where(original_size_attention_map2 > self.config.threshold2, 1., 0.)
+
             if mask_provided:
                 if self.config.use_crf:
                     crf_mask = torch.as_tensor(
@@ -243,8 +345,22 @@ class CoSegmenterTrainer(pl.LightningModule):
                 target_images_original.cpu() * (1 - binarized_attention_map2[None, ...]).cpu() + torch.stack(
                     [binarized_attention_map2 * 0, binarized_attention_map2 * 0, binarized_attention_map2], dim=0))
 
+            new_masked_image_grid1 = torchvision.utils.make_grid(
+                target_images_original.cpu() * (1 - new_binarized_attention_map1[None, ...]).cpu() + torch.stack(
+                    [new_binarized_attention_map1 * 0, new_binarized_attention_map1 * 0, new_binarized_attention_map1], dim=0))
+            new_masked_image_grid2 = torchvision.utils.make_grid(
+                target_images_original.cpu() * (1 - new_binarized_attention_map2[None, ...]).cpu() + torch.stack(
+                    [new_binarized_attention_map2 * 0, new_binarized_attention_map2 * 0, new_binarized_attention_map2], dim=0))
+
+            masked_image_grid3 = torchvision.utils.make_grid(
+                target_images_original.cpu() * (1 - binarized_attention_map3[None, ...]).cpu() + torch.stack(
+                    [binarized_attention_map3 * 0, binarized_attention_map3 * 0, binarized_attention_map3], dim=0))
+
             attention_grid1 = torchvision.utils.make_grid(self.final_prediction1)
             attention_grid2 = torchvision.utils.make_grid(self.final_prediction2)
+            new_attention_grid1 = torchvision.utils.make_grid(original_size_attention_map1)
+            new_attention_grid2 = torchvision.utils.make_grid(original_size_attention_map2)
+            attention_grid3 = torchvision.utils.make_grid((self.final_prediction1+self.final_prediction2)/2)
 
             log_id = batch_idx // self.config.test_num_crops
 
@@ -258,8 +374,14 @@ class CoSegmenterTrainer(pl.LightningModule):
 
             self.logger.experiment.add_image("test masked image1", masked_image_grid1, log_id)
             self.logger.experiment.add_image("test masked image2", masked_image_grid2, log_id)
+            self.logger.experiment.add_image("test new masked image1", new_masked_image_grid1, log_id)
+            self.logger.experiment.add_image("test new masked image2", new_masked_image_grid2, log_id)
+            self.logger.experiment.add_image("test masked image3", masked_image_grid3, log_id)
             self.logger.experiment.add_image("test attention maps1", attention_grid1, log_id)
             self.logger.experiment.add_image("test attention maps2", attention_grid2, log_id)
+            self.logger.experiment.add_image("test new attention maps1", new_attention_grid1, log_id)
+            self.logger.experiment.add_image("test new attention maps2", new_attention_grid2, log_id)
+            self.logger.experiment.add_image("test attention maps3", attention_grid3, log_id)
 
             self.final_prediction1 = 0
             self.final_prediction2 = 0
@@ -270,7 +392,11 @@ class CoSegmenterTrainer(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = getattr(optim, self.config.optimizer)(
-            [self.token_u, self.token_t],
-            lr=self.config.lr,
+            [
+                {'params': self.token_t, 'lr': self.config.lr_1},
+                {'params': self.token_u, 'lr': self.config.lr_2},
+
+            ],
+            lr=self.config.lr_1,
         )
         return {"optimizer": optimizer}
