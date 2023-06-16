@@ -1,11 +1,11 @@
 import pytorch_lightning as pl
 
-from src.config import Config
-from src.datasets.sample_dataset import SampleDataModule
-from src.datasets.pascal_voc_part_dataset import PascalVOCPartDataModule
 from src.co_part_segmentation_trainer import (
     CoSegmenterTrainer,
 )
+from src.config import Config
+from src.datasets.pascal_voc_part_dataset import PascalVOCPartDataModule
+from src.datasets.sample_dataset import SampleDataModule
 
 
 def main():
@@ -16,13 +16,9 @@ def main():
             src_image_dirs=config.src_image_paths,
             target_image_dir=config.target_image_path,
             src_segmentation_dirs=config.src_segmentation_paths,
-            location1=config.point_location1,
-            location2=config.point_location2,
             train_num_crops=config.train_num_crops,
             test_num_crops=config.test_num_crops,
             batch_size=config.batch_size,
-            train_crop_ratio=config.train_crop_ratio,
-            test_crop_ratio=config.test_crop_ratio,
             mask_size=config.mask_size,
         )
     elif config.dataset == "pascal":
@@ -33,13 +29,12 @@ def main():
             train_num_crops=config.train_num_crops,
             test_num_crops=config.test_num_crops,
             batch_size=config.batch_size,
-            train_crop_ratio=config.train_crop_ratio,
-            test_crop_ratio=config.test_crop_ratio,
-            train_data_id=config.train_data_id,
+            train_data_ids=config.train_data_ids,
             mask_size=config.mask_size,
             fill_background_with_black=config.fill_background_with_black,
             remove_overlapping_objects=config.remove_overlapping_objects,
             object_overlapping_threshold=config.object_overlapping_threshold,
+            data_portion=config.data_portion,
         )
     model = CoSegmenterTrainer(config=config)
     trainer = pl.Trainer(
@@ -50,7 +45,7 @@ def main():
         devices=config.gpu_id,
         # precision=16,
         log_every_n_steps=1,
-        accumulate_grad_batches=config.train_num_crops//config.batch_size,
+        accumulate_grad_batches=config.train_num_crops // config.batch_size,
         enable_checkpointing=False
     )
     if config.train:

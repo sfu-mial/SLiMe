@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+import math
 from copy import deepcopy
 
 
@@ -64,41 +65,6 @@ class StableDiffusion(nn.Module):
         self.device1 = None
         print(f'[INFO] loaded stable diffusion!')
 
-        # attention_modules = [
-        #     # 'down_blocks[0].attentions[0].transformer_blocks[0].attn1',
-        #     # 'down_blocks[0].attentions[0].transformer_blocks[0].attn2',
-        #     # 'down_blocks[0].attentions[1].transformer_blocks[0].attn1',
-        #     # 'down_blocks[0].attentions[1].transformer_blocks[0].attn2',
-        #     # 'down_blocks[1].attentions[0].transformer_blocks[0].attn1',
-        #     # 'down_blocks[1].attentions[0].transformer_blocks[0].attn2',
-        #     # 'down_blocks[1].attentions[1].transformer_blocks[0].attn1',
-        #     # 'down_blocks[1].attentions[1].transformer_blocks[0].attn2',
-        #     # 'down_blocks[2].attentions[0].transformer_blocks[0].attn1',
-        #     # 'down_blocks[2].attentions[0].transformer_blocks[0].attn2',  ##########
-        #     # 'down_blocks[2].attentions[1].transformer_blocks[0].attn1',
-        #     # 'down_blocks[2].attentions[1].transformer_blocks[0].attn2',  ##########
-        #     # 'up_blocks[1].attentions[0].transformer_blocks[0].attn1',
-        #     'up_blocks[1].attentions[0].transformer_blocks[0].attn2',  ########## +
-        #     # 'up_blocks[1].attentions[1].transformer_blocks[0].attn1',
-        #     'up_blocks[1].attentions[1].transformer_blocks[0].attn2',  ########## +
-        #     # 'up_blocks[1].attentions[2].transformer_blocks[0].attn1',
-        #     'up_blocks[1].attentions[2].transformer_blocks[0].attn2',  ########## +
-        #     # 'up_blocks[2].attentions[0].transformer_blocks[0].attn1',
-        #     'up_blocks[2].attentions[0].transformer_blocks[0].attn2',  #+
-        #     # 'up_blocks[2].attentions[1].transformer_blocks[0].attn1',
-        #     'up_blocks[2].attentions[1].transformer_blocks[0].attn2',  #+
-        #     # 'up_blocks[2].attentions[2].transformer_blocks[0].attn1',
-        #     'up_blocks[2].attentions[2].transformer_blocks[0].attn2',  #+ #-
-        #     # 'up_blocks[3].attentions[0].transformer_blocks[0].attn1',
-        #     # 'up_blocks[3].attentions[0].transformer_blocks[0].attn2', #-
-        #     # 'up_blocks[3].attentions[1].transformer_blocks[0].attn1',
-        #     # 'up_blocks[3].attentions[1].transformer_blocks[0].attn2',
-        #     # 'up_blocks[3].attentions[2].transformer_blocks[0].attn1',
-        #     # 'up_blocks[3].attentions[2].transformer_blocks[0].attn2',
-        #     # 'mid_block.attentions[0].transformer_blocks[0].attn1',
-        #     # 'mid_block.attentions[0].transformer_blocks[0].attn2'
-        # ]
-
         self.attention_maps = {}
         self.noise = None
         if self.partial_run:
@@ -109,17 +75,29 @@ class StableDiffusion(nn.Module):
 
         def create_nested_hook(n):
             def hook(module, input, output):
-                # channel, img_embed_len, text_embed_len = output[1].shape
-                # self.attention_maps[n] = output[1].softmax(dim=-1).reshape(channel, int(math.sqrt(img_embed_len)),
-                #                                                            int(math.sqrt(img_embed_len)),
-                #                                                            text_embed_len)
                 self.attention_maps[n] = output[1]
 
             return hook
 
-        handles = []
+        self.handles = []
         for module in attention_layers_to_use:
-            handles.append(eval("self.unet." + module).register_forward_hook(create_nested_hook(module)))
+            self.handles.append(eval("self.unet." + module).register_forward_hook(create_nested_hook(module)))
+
+    def change_hooks(self, attention_layers_to_use):
+        for handle in self.handles:
+            handle.remove()
+        self.handles = []
+        self.attention_maps = {}
+
+        def create_nested_hook_with_detach(n):
+            def hook(module, input, output):
+                self.attention_maps[n] = output[1].detach()
+
+            return hook
+
+        for module in attention_layers_to_use:
+            self.handles.append(
+                eval("self.unet." + module).register_forward_hook(create_nested_hook_with_detach(module)))
 
     def setup(self, device, device1=None):
         self.device1 = device if device1 is None else device1
@@ -146,15 +124,57 @@ class StableDiffusion(nn.Module):
         with torch.set_grad_enabled(False):
             uncond_embeddings = self.text_encoder(uncond_input.input_ids)[0]
 
-        # Cat for final embeddings
-        # text_embeddings = text_embeddings.clone().detach()
-        # text_embeddings.requires_grad = True
-        # self.optimizer = torch.optim.Adam([text_embeddings], lr=1e-2 * (1. - 0 / 100.))
-        # text_embeddings = torch.cat([uncond_embeddings, text_embeddings])
         return uncond_embeddings, text_embeddings
 
+    def get_attention_map(self, raw_attention_maps, output_size=256, token_id=2):
+        cross_attention_maps = {}
+        self_attention_maps = {}
+        for layer in raw_attention_maps:
+            if layer.endswith("2"):  # cross attentions
+                split_attention_maps = torch.stack(raw_attention_maps[layer].chunk(2), dim=0)
+                _, channel, img_embed_len, text_embed_len = split_attention_maps.shape
+                reshaped_split_attention_maps = split_attention_maps.softmax(dim=-1)[:, :, :, token_id].reshape(
+                    2,  # because of chunk
+                    channel,
+                    int(math.sqrt(img_embed_len)),
+                    int(math.sqrt(img_embed_len)),
+                )
+
+                resized_reshaped_split_attention_maps = torch.nn.functional.interpolate(reshaped_split_attention_maps,
+                                                                                        size=output_size,
+                                                                                        mode='bilinear').mean(dim=1)
+                cross_attention_maps[layer] = resized_reshaped_split_attention_maps
+
+            if layer.endswith("1"):  # self attentions
+                channel, img_embed_len, img_embed_len = raw_attention_maps[layer].shape
+                split_attention_maps = raw_attention_maps[layer][:channel // 2]
+                reshaped_split_attention_maps = split_attention_maps.softmax(dim=-1).reshape(
+                    # 2,  # because of chunk
+                    channel // 2,
+                    int(math.sqrt(img_embed_len)),
+                    int(math.sqrt(img_embed_len)),
+                    img_embed_len
+                ).permute(0, 3, 1, 2)
+                resized_reshaped_split_attention_maps = torch.nn.functional.interpolate(reshaped_split_attention_maps,
+                                                                                        size=output_size,
+                                                                                        mode='bilinear')
+                resized_reshaped_split_attention_maps = resized_reshaped_split_attention_maps.mean(dim=0)
+                self_attention_maps[layer] = resized_reshaped_split_attention_maps
+
+        sd_cross_attention_maps = [None, None]
+        sd_self_attention_maps = None
+
+        if len(cross_attention_maps.values()) > 0:
+            sd_cross_attention_maps = torch.stack(list(cross_attention_maps.values()), dim=0).mean(dim=0).to(
+                self.device)
+        if len(self_attention_maps.values()) > 0:
+            sd_self_attention_maps = list(map(lambda x: x.to(self.device), list(self_attention_maps.values())))
+
+        return sd_cross_attention_maps[0], sd_cross_attention_maps[1], sd_self_attention_maps
+
     def train_step(self, text_embeddings, input_image, guidance_scale=100, t=None, back_propagate_loss=True,
-                   generate_new_noise=True, phase=0, attention_map=None, loss_coef=1, latents=None):
+                   generate_new_noise=True, phase=0, attention_map=None, loss_coef=1, latents=None,
+                   attention_output_size=256, token_id=2):
 
         # torch.cuda.synchronize(); print(f'[TIME] guiding: interp {time.time() - _t:.4f}s')
         if not (input_image.shape[-2] == 512 and input_image.shape[-1] == 512):
@@ -187,10 +207,12 @@ class StableDiffusion(nn.Module):
             # pred noise
             latent_model_input = torch.cat([latents_noisy] * 2)
             noise_pred_ = self.unet(latent_model_input.to(self.device1), t.to(self.device1),
-                                    encoder_hidden_states=text_embeddings.to(self.device1), partial_run=self.partial_run).sample.to(self.device)
+                                    encoder_hidden_states=text_embeddings.to(self.device1),
+                                    partial_run=self.partial_run).sample.to(self.device)
 
         # torch.cuda.synchronize(); print(f'[TIME] guiding: unet {time.time() - _t:.4f}s')
-
+        sd_cross_attention_maps1, sd_cross_attention_maps2, sd_self_attention_maps = self.get_attention_map(
+            self.attention_maps, output_size=attention_output_size, token_id=token_id)
         if not self.partial_run:
             # perform guidance (high scale from paper!)
             noise_pred_uncond, noise_pred_text = noise_pred_.chunk(2)
@@ -210,8 +232,8 @@ class StableDiffusion(nn.Module):
                 latents.backward(gradient=grad * loss_coef, retain_graph=True)
             # torch.cuda.synchronize(); print(f'[TIME] guiding: backward {time.time() - _t:.4f}s')
 
-            return loss, self.attention_maps
-        return 0, self.attention_maps
+            return loss, sd_cross_attention_maps1, sd_cross_attention_maps2, sd_self_attention_maps
+        return 0, sd_cross_attention_maps1, sd_cross_attention_maps2, sd_self_attention_maps
 
     def produce_latents(self, text_embeddings, height=512, width=512, num_inference_steps=50, guidance_scale=7.5,
                         latents=None):
@@ -230,7 +252,9 @@ class StableDiffusion(nn.Module):
 
                 # predict the noise residual
                 with torch.no_grad():
-                    noise_pred = self.unet(latent_model_input.to(self.device1), t.to(self.device1), encoder_hidden_states=text_embeddings.to(self.device1))['sample'].to(self.device)
+                    noise_pred = self.unet(latent_model_input.to(self.device1), t.to(self.device1),
+                                           encoder_hidden_states=text_embeddings.to(self.device1))['sample'].to(
+                        self.device)
 
                 # perform guidance
                 noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)

@@ -15,7 +15,7 @@ def crf(original_image, annotated_image, use_2d=True):
     annotated_image = annotated_image.astype(np.uint32)
     # Converting the annotations RGB color to single 32 bit integer
     annotated_label = annotated_image[:, :, 0].astype(np.uint32) + (annotated_image[:, :, 1] << 8).astype(np.uint32) + (
-                annotated_image[:, :, 2] << 16).astype(np.uint32)
+            annotated_image[:, :, 2] << 16).astype(np.uint32)
 
     # Convert the 32bit integer color to 0,1, 2, ... labels.
     colors, labels = np.unique(annotated_label, return_inverse=True)
