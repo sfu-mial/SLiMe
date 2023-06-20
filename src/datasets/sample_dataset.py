@@ -33,8 +33,8 @@ class SampleDataset(Dataset):
             coords = []
             if self.num_cropped > 1:
                 x_start, x_end, y_start, y_end, crop_size = get_square_cropping_coords(segmentation)
-                coords.append([y_start, y_end, x_start, x_end])
-                for square_size in torch.linspace(crop_size, 512, self.num_cropped)[1:-1]:
+                # coords.append([y_start, y_end, x_start, x_end])
+                for square_size in torch.linspace(crop_size, 512, self.num_cropped + 1)[1:-1]:
                     x_start, x_end, y_start, y_end, crop_size = get_square_cropping_coords(segmentation,
                                                                                            square_size=square_size)
                     coords.append([y_start, y_end, x_start, x_end])

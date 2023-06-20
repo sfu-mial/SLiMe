@@ -126,11 +126,12 @@ class StableDiffusion(nn.Module):
 
         return uncond_embeddings, text_embeddings
 
-    def get_attention_map(self, raw_attention_maps, output_size=256, token_id=2):
+    def get_attention_map(self, raw_attention_maps, output_size=256, token_id=2, average_layers=True):
         cross_attention_maps = {}
         self_attention_maps = {}
+        resnets = {}
         for layer in raw_attention_maps:
-            if layer.endswith("2"):  # cross attentions
+            if layer.endswith("attn2"):  # cross attentions
                 split_attention_maps = torch.stack(raw_attention_maps[layer].chunk(2), dim=0)
                 _, channel, img_embed_len, text_embed_len = split_attention_maps.shape
                 reshaped_split_attention_maps = split_attention_maps.softmax(dim=-1)[:, :, :, token_id].reshape(
@@ -145,7 +146,7 @@ class StableDiffusion(nn.Module):
                                                                                         mode='bilinear').mean(dim=1)
                 cross_attention_maps[layer] = resized_reshaped_split_attention_maps
 
-            if layer.endswith("1"):  # self attentions
+            elif layer.endswith("attn1"):  # self attentions
                 channel, img_embed_len, img_embed_len = raw_attention_maps[layer].shape
                 split_attention_maps = raw_attention_maps[layer][:channel // 2]
                 reshaped_split_attention_maps = split_attention_maps.softmax(dim=-1).reshape(
@@ -160,21 +161,29 @@ class StableDiffusion(nn.Module):
                                                                                         mode='bilinear')
                 resized_reshaped_split_attention_maps = resized_reshaped_split_attention_maps.mean(dim=0)
                 self_attention_maps[layer] = resized_reshaped_split_attention_maps
-
+            elif layer.endswith("conv1") or layer.endswith("conv2"):  # resnets
+                resnets[layer] = raw_attention_maps[layer].detach()
         sd_cross_attention_maps = [None, None]
         sd_self_attention_maps = None
 
         if len(cross_attention_maps.values()) > 0:
-            sd_cross_attention_maps = torch.stack(list(cross_attention_maps.values()), dim=0).mean(dim=0).to(
-                self.device)
+            if average_layers:
+                sd_cross_attention_maps = torch.stack(list(cross_attention_maps.values()), dim=0).mean(dim=0).to(
+                    self.device)
+            else:
+                sd_cross_attention_maps = torch.stack(list(cross_attention_maps.values()), dim=1).to(
+                    self.device)
         if len(self_attention_maps.values()) > 0:
             sd_self_attention_maps = list(map(lambda x: x.to(self.device), list(self_attention_maps.values())))
+
+        if len(resnets.values()) > 0:
+            r = list(map(lambda x: x.to(self.device), list(resnets.values())))
 
         return sd_cross_attention_maps[0], sd_cross_attention_maps[1], sd_self_attention_maps
 
     def train_step(self, text_embeddings, input_image, guidance_scale=100, t=None, back_propagate_loss=True,
                    generate_new_noise=True, phase=0, attention_map=None, loss_coef=1, latents=None,
-                   attention_output_size=256, token_id=2):
+                   attention_output_size=256, token_id=2, average_layers=True):
 
         # torch.cuda.synchronize(); print(f'[TIME] guiding: interp {time.time() - _t:.4f}s')
         if not (input_image.shape[-2] == 512 and input_image.shape[-1] == 512):
@@ -212,27 +221,27 @@ class StableDiffusion(nn.Module):
 
         # torch.cuda.synchronize(); print(f'[TIME] guiding: unet {time.time() - _t:.4f}s')
         sd_cross_attention_maps1, sd_cross_attention_maps2, sd_self_attention_maps = self.get_attention_map(
-            self.attention_maps, output_size=attention_output_size, token_id=token_id)
-        if not self.partial_run:
-            # perform guidance (high scale from paper!)
-            noise_pred_uncond, noise_pred_text = noise_pred_.chunk(2)
-            noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
-
-            # w(t), sigma_t^2
-            # w = (1 - self.alphas[t])
-            w = self.alphas[t] ** 0.5 * (1 - self.alphas[t])
-            grad = w * (noise_pred - noise)
-            # clip grad for stable training?
-            # grad = grad.clamp(-10, 10)
-            grad = torch.nan_to_num(grad)
-            loss = F.mse_loss(noise_pred, noise.float())
-            # manually backward, since we omitted an item in grad and cannot simply autodiff.
-            # _t = time.time()
-            if back_propagate_loss:
-                latents.backward(gradient=grad * loss_coef, retain_graph=True)
-            # torch.cuda.synchronize(); print(f'[TIME] guiding: backward {time.time() - _t:.4f}s')
-
-            return loss, sd_cross_attention_maps1, sd_cross_attention_maps2, sd_self_attention_maps
+            self.attention_maps, output_size=attention_output_size, token_id=token_id, average_layers=average_layers)
+        # if not self.partial_run:
+        #     # perform guidance (high scale from paper!)
+        #     noise_pred_uncond, noise_pred_text = noise_pred_.chunk(2)
+        #     noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
+        #
+        #     # w(t), sigma_t^2
+        #     # w = (1 - self.alphas[t])
+        #     w = self.alphas[t] ** 0.5 * (1 - self.alphas[t])
+        #     grad = w * (noise_pred - noise)
+        #     # clip grad for stable training?
+        #     # grad = grad.clamp(-10, 10)
+        #     grad = torch.nan_to_num(grad)
+        #     loss = F.mse_loss(noise_pred, noise.float())
+        #     # manually backward, since we omitted an item in grad and cannot simply autodiff.
+        #     # _t = time.time()
+        #     if back_propagate_loss:
+        #         latents.backward(gradient=grad * loss_coef, retain_graph=True)
+        #     # torch.cuda.synchronize(); print(f'[TIME] guiding: backward {time.time() - _t:.4f}s')
+        #
+        #     return loss, sd_cross_attention_maps1, sd_cross_attention_maps2, sd_self_attention_maps
         return 0, sd_cross_attention_maps1, sd_cross_attention_maps2, sd_self_attention_maps
 
     def produce_latents(self, text_embeddings, height=512, width=512, num_inference_steps=50, guidance_scale=7.5,
