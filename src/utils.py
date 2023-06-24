@@ -72,3 +72,15 @@ def post_process_attention_map(attention_map, target_coords):
     original_size_attention_map[y_start: y_end, x_start: x_end] = attention_map
     # binarized_original_size_attention_map = torch.where(original_size_attention_map > threshold, 1., 0.)
     return original_size_attention_map
+
+
+def get_crops_coords(image_size, crop_size, num_cropps_per_side):
+    h, w = image_size
+    x_step_size = ((w-crop_size)//(num_cropps_per_side-1))
+    y_step_size = ((h-crop_size)//(num_cropps_per_side-1))
+    crops_coords = []
+    for i in range(num_cropps_per_side):
+        for j in range(num_cropps_per_side):
+            y_start, y_end, x_start, x_end = i * y_step_size, i * y_step_size + crop_size, j * x_step_size, j * x_step_size + crop_size
+            crops_coords.append([y_start, y_end, x_start, x_end])
+    return crops_coords

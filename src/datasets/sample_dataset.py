@@ -19,16 +19,16 @@ class SampleDataset(Dataset):
 
     def __getitem__(self, idx):
         image = Image.open(self.image_dirs[idx % len(self.image_dirs)])
-        w, h = image.size
-        image = transforms.functional.center_crop(image, (min(w, h), min(w, h)))
-        image = transforms.functional.resize(image, size=512)
+        # w, h = image.size
+        # image = transforms.functional.center_crop(image, (min(w, h), min(w, h)))
+        image = transforms.functional.resize(image, size=(512, 512))
         image = transforms.functional.to_tensor(image)
         if self.train:
             segmentation = Image.open(self.segmentation_dirs[idx % len(self.image_dirs)])
-            w, h = segmentation.size
-            segmentation = transforms.functional.center_crop(segmentation, (min(w, h), min(w, h)))
-            segmentation = transforms.functional.resize(segmentation, size=512)
-            segmentation = transforms.functional.to_tensor(segmentation)[0].type(torch.float)
+            # w, h = segmentation.size
+            # segmentation = transforms.functional.center_crop(segmentation, (min(w, h), min(w, h)))
+            segmentation = transforms.functional.resize(segmentation, size=(512, 512))
+            segmentation = transforms.functional.to_tensor(segmentation).sum(dim=0)
             segmentation = torch.where(segmentation >= 0.5, 1., 0.)
             coords = []
             if self.num_cropped > 1:
@@ -36,7 +36,7 @@ class SampleDataset(Dataset):
                 # coords.append([y_start, y_end, x_start, x_end])
                 for square_size in torch.linspace(crop_size, 512, self.num_cropped + 1)[1:-1]:
                     x_start, x_end, y_start, y_end, crop_size = get_square_cropping_coords(segmentation,
-                                                                                           square_size=square_size)
+                                                                                           square_size=int(square_size))
                     coords.append([y_start, y_end, x_start, x_end])
             coords.append([0, 512, 0, 512])
             random_idx = random.randint(0, self.num_cropped-1)

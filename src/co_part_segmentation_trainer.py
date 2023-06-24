@@ -8,7 +8,7 @@ from torch import optim
 from src.config import Config
 from src.crf import crf
 from src.stable_difusion import StableDiffusion
-from src.utils import get_square_cropping_coords, calculate_iou, post_process_attention_map
+from src.utils import calculate_iou, post_process_attention_map, get_crops_coords
 
 
 class CoSegmenterTrainer(pl.LightningModule):
@@ -28,13 +28,6 @@ class CoSegmenterTrainer(pl.LightningModule):
         self.min_loss_2 = 10000000
         self.generate_noise = True
         os.makedirs(self.config.checkpoint_dir, exist_ok=True)
-
-        # self.upsizer = torch.nn.Sequential(
-        #     # torch.nn.ConvTranspose2d(1, 3, 2, 2),
-        #     torch.nn.ReLU(),
-        #     torch.nn.ConvTranspose2d(1, 1, 2, 2),
-        #     torch.nn.Sigmoid()
-        # )
 
         if self.config.train:
             uncond_embeddings, text_embeddings = self.stable_diffusion.get_text_embeds("object part", "object part")
@@ -71,12 +64,6 @@ class CoSegmenterTrainer(pl.LightningModule):
             self_attention_map = sd_self_attention_maps[0][torch.where(small_mask2.flatten() == 0.1)[0]].mean(dim=0)
             loss3 = torch.nn.functional.mse_loss(self_attention_map, small_mask2)
 
-        # up_sd_cross_attention_maps1 = self.upsizer(sd_cross_attention_maps1[None, None, ...])[0, 0]
-        # up_sd_cross_attention_maps2 = self.upsizer(sd_cross_attention_maps2[None, None, ...])[0, 0]
-
-        # print(up_sd_cross_attention_maps1.unique())
-        # print(up_sd_cross_attention_maps2.unique())
-
         sd_cross_attention_maps1 = (sd_cross_attention_maps1 - sd_cross_attention_maps1.min()) / (
                 sd_cross_attention_maps1.max() - sd_cross_attention_maps1.min())
 
@@ -100,11 +87,6 @@ class CoSegmenterTrainer(pl.LightningModule):
         sd_cross_attention_maps2 = (sd_cross_attention_maps2 - sd_cross_attention_maps2.min()) / (
                 sd_cross_attention_maps2.max() - sd_cross_attention_maps2.min())
 
-        # up_sd_cross_attention_maps1 = (up_sd_cross_attention_maps1 - up_sd_cross_attention_maps1.min()) / (
-        #         up_sd_cross_attention_maps1.max() - up_sd_cross_attention_maps1.min())
-        # up_sd_cross_attention_maps2 = (up_sd_cross_attention_maps2 - up_sd_cross_attention_maps2.min()) / (
-        #         up_sd_cross_attention_maps2.max() - up_sd_cross_attention_maps2.min())
-
         if sd_self_attention_maps is not None:
             self_attention_map = (self_attention_map - self_attention_map.min()) / (self_attention_map.max() - self_attention_map.min())
             self_attention_map_grid = torchvision.utils.make_grid(self_attention_map[None, ...])
@@ -113,8 +95,6 @@ class CoSegmenterTrainer(pl.LightningModule):
         images_grid = torchvision.utils.make_grid(src_images)
         sd_attention_maps_grid1 = torchvision.utils.make_grid(sd_cross_attention_maps1[None, ...])
         sd_attention_maps_grid2 = torchvision.utils.make_grid(sd_cross_attention_maps2[None, ...])
-        # up_sd_cross_attention_maps_grid1 = torchvision.utils.make_grid(up_sd_cross_attention_maps1[None, None, ...])
-        # up_sd_cross_attention_maps_grid2 = torchvision.utils.make_grid(up_sd_cross_attention_maps2[None, None, ...])
         mask1_grid = torchvision.utils.make_grid(mask1[None, ...])
         mask2_grid = torchvision.utils.make_grid(mask2[None, ...])
         mask3_grid = torchvision.utils.make_grid(small_mask2[None, ...])
@@ -122,8 +102,6 @@ class CoSegmenterTrainer(pl.LightningModule):
         self.logger.experiment.add_image("train image", images_grid, 0)
         self.logger.experiment.add_image("train sd attention maps1", sd_attention_maps_grid1, self.counter)
         self.logger.experiment.add_image("train sd attention maps2", sd_attention_maps_grid2, self.counter)
-        # self.logger.experiment.add_image("train up sd attention maps1", up_sd_cross_attention_maps_grid1, self.counter)
-        # self.logger.experiment.add_image("train up sd attention maps2", up_sd_cross_attention_maps_grid2, self.counter)
         self.logger.experiment.add_image("train mask1", mask1_grid, self.counter)
         self.logger.experiment.add_image("train mask2", mask2_grid, self.counter)
         self.logger.experiment.add_image("train mask3", mask3_grid, self.counter)
@@ -136,13 +114,13 @@ class CoSegmenterTrainer(pl.LightningModule):
 
     def on_test_start(self) -> None:
         self.stable_diffusion.setup(self.device, torch.device(f"cuda:{self.config.second_gpu_id}"))
-        self.stable_diffusion.change_hooks(attention_layers_to_use=self.config.attention_layers_to_use[:-1])  # exclude self attention layer
+        self.stable_diffusion.change_hooks(attention_layers_to_use=self.config.attention_layers_to_use)  # exclude self attention layer
         self.text_embedding = torch.load(os.path.join(self.config.checkpoint_dir, "optimized_text_embedding_1.pth")).to(
             self.device)
         self.uncond_embedding = torch.load(
             os.path.join(self.config.checkpoint_dir, "optimized_text_embedding_2.pth")).to(
             self.device)
-        noise = torch.load(os.path.join(self.config.checkpoint_dir, "noise.pth"))
+        noise = torch.load(os.path.join(self.config.checkpoint_dir, "noise.pth")).to(self.device)
         self.stable_diffusion.noise = noise
 
     def get_attention_maps(self, image, y_start, y_end, x_start, x_end, threshold1, threshold2):
@@ -151,9 +129,6 @@ class CoSegmenterTrainer(pl.LightningModule):
                 torch.cat([self.uncond_embedding, self.text_embedding], dim=0), image,
                 t=torch.tensor(20), back_propagate_loss=False, generate_new_noise=False, attention_output_size=512,
                 token_id=2)
-
-        # sd_cross_attention_maps1 = self.upsizer(sd_cross_attention_maps1[None, None, ...])[0, 0]
-        # sd_cross_attention_maps2 = self.upsizer(sd_cross_attention_maps2[None, None, ...])[0, 0]
 
         original_size_attention_map1 = post_process_attention_map(
             sd_cross_attention_maps1,
@@ -182,163 +157,158 @@ class CoSegmenterTrainer(pl.LightningModule):
 
         return original_size_attention_map1, original_size_attention_map2, binarized_attention_map1, binarized_attention_map2
 
+    def get_patched_masks(self, image, crop_size, num_crops_per_side, threshold):
+        crops_coords = get_crops_coords(image.shape[2:], crop_size,
+                                        num_crops_per_side)
+
+        max_attention_value = 0
+        final_attention_map = torch.zeros(*image.shape[2:]).to(self.stable_diffusion.device)
+        aux_attention_map = torch.zeros(*image.shape[2:]).to(self.stable_diffusion.device)
+        for i in range(num_crops_per_side):
+            for j in range(num_crops_per_side):
+                y_start, y_end, x_start, x_end = crops_coords[i * num_crops_per_side + j]
+                cropped_image = image[:, :, y_start:y_end, x_start:x_end]
+                cropped_image = torch.nn.functional.interpolate(cropped_image, 512, mode="bilinear")
+                with torch.no_grad():
+                    loss, sd_cross_attention_maps1, sd_cross_attention_maps2, sd_self_attention_maps = self.stable_diffusion.train_step(
+                        torch.cat([self.uncond_embedding, self.text_embedding], dim=0), cropped_image,
+                        t=torch.tensor(10), back_propagate_loss=False, generate_new_noise=False,
+                        attention_output_size=64,
+                        token_id=2)
+                if sd_cross_attention_maps2.max() >= max_attention_value:
+                    max_attention_value = sd_cross_attention_maps2.max()
+                    binarized_sd_cross_attention_maps2 = torch.where(
+                        sd_cross_attention_maps2 > sd_cross_attention_maps2.mean() + 1 * sd_cross_attention_maps2.std(),
+                        1, 0)
+                    if torch.all(binarized_sd_cross_attention_maps2 == 0):
+                        binarized_sd_cross_attention_maps2 = torch.where(
+                            sd_cross_attention_maps2 > sd_cross_attention_maps2.mean(), 1, 0)
+                    masked_pixels_ids = torch.where(binarized_sd_cross_attention_maps2.flatten() == 1)[0]
+                    large_sd_self_attention_map = \
+                        torch.nn.functional.interpolate(sd_self_attention_maps[0][None, ...],
+                                                        crop_size, mode="bilinear")[0]
+                    avg_large_sd_self_attention_map = (sd_cross_attention_maps2.flatten()[masked_pixels_ids][..., None, None] * large_sd_self_attention_map[masked_pixels_ids]).mean(dim=0)
+                    avg_large_sd_self_attention_map = (avg_large_sd_self_attention_map - avg_large_sd_self_attention_map.min()) / (avg_large_sd_self_attention_map.max() - avg_large_sd_self_attention_map.min())
+
+                    final_max_attention_map = torch.zeros(*image.shape[2:]).to(self.stable_diffusion.device)
+                    aux_max_attention_map = torch.zeros(*image.shape[2:]).to(self.stable_diffusion.device)
+
+                    final_max_attention_map[y_start:y_end, x_start:x_end] = (avg_large_sd_self_attention_map * sd_cross_attention_maps2.max())
+                    aux_max_attention_map[y_start:y_end, x_start:x_end] = torch.ones_like(avg_large_sd_self_attention_map) * sd_cross_attention_maps2.max()
+
+                if sd_cross_attention_maps2.max() >= threshold:
+                    binarized_sd_cross_attention_maps2 = torch.where(
+                        sd_cross_attention_maps2 > sd_cross_attention_maps2.mean() + 1 * sd_cross_attention_maps2.std(),
+                        1, 0)
+                    if torch.all(binarized_sd_cross_attention_maps2 == 0):
+                        binarized_sd_cross_attention_maps2 = torch.where(
+                            sd_cross_attention_maps2 > sd_cross_attention_maps2.mean(), 1, 0)
+                    masked_pixels_ids = torch.where(binarized_sd_cross_attention_maps2.flatten() == 1)[0]
+                    large_sd_self_attention_map = \
+                        torch.nn.functional.interpolate(sd_self_attention_maps[0][None, ...],
+                                                        crop_size, mode="bilinear")[0]
+                    avg_large_sd_self_attention_map = (sd_cross_attention_maps2.flatten()[masked_pixels_ids][..., None, None] * large_sd_self_attention_map[masked_pixels_ids]).mean(dim=0)
+                    avg_large_sd_self_attention_map = (avg_large_sd_self_attention_map - avg_large_sd_self_attention_map.min()) / (avg_large_sd_self_attention_map.max() - avg_large_sd_self_attention_map.min())
+
+                    final_attention_map[y_start:y_end, x_start:x_end] += (avg_large_sd_self_attention_map * sd_cross_attention_maps2.max())
+                    aux_attention_map[y_start:y_end, x_start:x_end] += torch.ones_like(avg_large_sd_self_attention_map) * sd_cross_attention_maps2.max()
+
+        return final_attention_map, aux_attention_map, final_max_attention_map, aux_max_attention_map
+
     def test_step(self, batch, batch_idx):
         image, mask = batch
         mask_provided = not torch.all(mask == 0)
         if mask_provided:
             mask = mask[0]
 
-        original_size_attention_map1, original_size_attention_map2, binarized_attention_map1, binarized_attention_map2 = self.get_attention_maps(image, 0, 512, 0, 512, self.config.threshold1, self.config.threshold2)
+        # small_final_attention_map, small_aux_attention_map, final_max_attention_map, aux_max_attention_map = self.get_patched_masks(image,
+        #                                                                                           self.config.small_crop_size,
+        #                                                                                           self.config.num_small_crops_per_side,
+        #                                                                                           self.config.small_crop_threshold
+        #                                                                                           )
 
-        attention_grid1 = torchvision.utils.make_grid(original_size_attention_map1)
-        attention_grid2 = torchvision.utils.make_grid(original_size_attention_map2)
+        large_final_attention_map, large_aux_attention_map, final_max_attention_map, aux_max_attention_map = self.get_patched_masks(image,
+                                                                                                  self.config.large_crop_size,
+                                                                                                  self.config.num_large_crops_per_side,
+                                                                                                  self.config.large_crop_threshold
+                                                                                                  )
 
-        masked_image_grid1 = torchvision.utils.make_grid(
+        if torch.all(large_final_attention_map == 0):
+            final_max_attention_map /= aux_max_attention_map
+            ones_indices = torch.where(aux_max_attention_map.flatten() > 0)[0]
+            mean = final_max_attention_map.flatten()[ones_indices].mean()
+            std = final_max_attention_map.flatten()[ones_indices].std()
+            final_predicted_mask_0 = torch.where(final_max_attention_map > mean, 1, 0)
+            final_predicted_mask_1 = torch.where(final_max_attention_map > mean + 1 * std, 1, 0)
+            final_predicted_mask_2 = torch.where(final_max_attention_map > mean + 2 * std, 1, 0)
+        else:
+            large_final_attention_map /= large_aux_attention_map
+            ones_indices = torch.where(large_aux_attention_map.flatten() > 0)[0]
+            mean = large_final_attention_map.flatten()[ones_indices].mean()
+            std = large_final_attention_map.flatten()[ones_indices].std()
+            final_predicted_mask_0 = torch.where(large_final_attention_map > mean, 1, 0)
+            final_predicted_mask_1 = torch.where(large_final_attention_map > mean + 1 * std, 1, 0)
+            final_predicted_mask_2 = torch.where(large_final_attention_map > mean + 2 * std, 1, 0)
+        final_predicted_mask_0 = final_predicted_mask_0.cpu()
+        final_predicted_mask_1 = final_predicted_mask_1.cpu()
+        final_predicted_mask_2 = final_predicted_mask_2.cpu()
+
+        mask_grid_0 = torchvision.utils.make_grid(final_predicted_mask_0)
+        mask_grid_1 = torchvision.utils.make_grid(final_predicted_mask_1)
+        mask_grid_2 = torchvision.utils.make_grid(final_predicted_mask_2)
+
+        masked_image_grid_0 = torchvision.utils.make_grid(
             image[0].cpu() * (
-                    1 - binarized_attention_map1[None, ...]).cpu() + torch.stack(
-                [binarized_attention_map1 * 0, binarized_attention_map1 * 0,
-                 binarized_attention_map1], dim=0))
-        masked_image_grid2 = torchvision.utils.make_grid(
+                    1 - final_predicted_mask_0[None, ...]) + torch.stack(
+                [final_predicted_mask_0 * 0, final_predicted_mask_0 * 0, final_predicted_mask_0], dim=0))
+        masked_image_grid_1 = torchvision.utils.make_grid(
             image[0].cpu() * (
-                    1 - binarized_attention_map2[None, ...]).cpu() + torch.stack(
-                [binarized_attention_map2 * 0, binarized_attention_map2 * 0,
-                 binarized_attention_map2], dim=0))
+                    1 - final_predicted_mask_1[None, ...]) + torch.stack(
+                [final_predicted_mask_1 * 0, final_predicted_mask_1 * 0, final_predicted_mask_1], dim=0))
+        masked_image_grid_2 = torchvision.utils.make_grid(
+            image[0].cpu() * (
+                    1 - final_predicted_mask_2[None, ...]) + torch.stack(
+                [final_predicted_mask_2 * 0, final_predicted_mask_2 * 0, final_predicted_mask_2], dim=0))
 
         image_grid = torchvision.utils.make_grid(image)
 
-        log_id = self.config.test_num_crops * batch_idx
-
-        self.logger.experiment.add_image("test attention map1", attention_grid1, log_id)
-        self.logger.experiment.add_image("test attention map2", attention_grid2, log_id)
-        self.logger.experiment.add_image("test masked image1", masked_image_grid1, log_id)
-        self.logger.experiment.add_image("test masked image2", masked_image_grid2, log_id)
-        self.logger.experiment.add_image("test image", image_grid, log_id)
-        coords = []
-        if self.config.test_num_crops > 1:
-            x_start, x_end, y_start, y_end, crop_size = get_square_cropping_coords(binarized_attention_map1)
-            # coords = [[y_start, y_end, x_start, x_end]]
-            for square_size in torch.linspace(crop_size, 512, self.config.test_num_crops+1)[1:-1]:
-                x_start, x_end, y_start, y_end, crop_size = get_square_cropping_coords(binarized_attention_map1,
-                                                                                            square_size=square_size)
-                coords.append([y_start, y_end, x_start, x_end])
-
-        x_start, x_end, y_start, y_end, crop_size = get_square_cropping_coords(binarized_attention_map1)
-        coords.append([y_start, y_end, x_start, x_end])
-
-        # sd_multi_scale_cross_attention_maps1 = original_size_attention_map1
-        # sd_multi_scale_cross_attention_maps2 = original_size_attention_map2
-        sd_multi_scale_cross_attention_maps1 = 0
-        sd_multi_scale_cross_attention_maps2 = 0
-        weights = 0
-
-        for idx, (y_start, y_end, x_start, x_end) in enumerate(coords[::-1]):
-            cropped_image = image[:, :, y_start:y_end, x_start:x_end]
-            cropped_image = torch.nn.functional.interpolate(cropped_image, 512, mode="bilinear")
-            original_size_attention_map1, original_size_attention_map2, binarized_attention_map1, binarized_attention_map2 = self.get_attention_maps(
-                cropped_image, y_start, y_end, x_start, x_end, "mean+2std", "mean+2std")
-
-            sd_multi_scale_cross_attention_maps1 += ((idx+1) * original_size_attention_map1)
-            sd_multi_scale_cross_attention_maps2 += ((idx+1) * original_size_attention_map2)
-            weights += (idx+1)
-
-            attention_grid1 = torchvision.utils.make_grid(original_size_attention_map1)
-            attention_grid2 = torchvision.utils.make_grid(original_size_attention_map2)
-
-            masked_image_grid1 = torchvision.utils.make_grid(
-                image[0].cpu() * (
-                            1 - binarized_attention_map1[None, ...]).cpu() + torch.stack(
-                    [binarized_attention_map1 * 0, binarized_attention_map1 * 0,
-                     binarized_attention_map1], dim=0))
-            masked_image_grid2 = torchvision.utils.make_grid(
-                image[0].cpu() * (
-                            1 - binarized_attention_map2[None, ...]).cpu() + torch.stack(
-                    [binarized_attention_map2 * 0, binarized_attention_map2 * 0,
-                     binarized_attention_map2], dim=0))
-
-            cropped_image_grid = torchvision.utils.make_grid(cropped_image)
-
-            log_id += 1
-
-            self.logger.experiment.add_image("test attention map1", attention_grid1, log_id)
-            self.logger.experiment.add_image("test attention map2", attention_grid2, log_id)
-            self.logger.experiment.add_image("test masked image1", masked_image_grid1, log_id)
-            self.logger.experiment.add_image("test masked image2", masked_image_grid2, log_id)
-            self.logger.experiment.add_image("test image", cropped_image_grid, log_id)
-
-        sd_multi_scale_cross_attention_maps1 /= weights
-        sd_multi_scale_cross_attention_maps2 /= weights
-
-        if self.config.threshold1 == "mean+std":
-            threshold = sd_multi_scale_cross_attention_maps1.mean() + 1 * sd_multi_scale_cross_attention_maps1.std()
-        elif self.config.threshold1 == "mean+2std":
-            threshold = sd_multi_scale_cross_attention_maps1.mean() + 2 * sd_multi_scale_cross_attention_maps1.std()
-        elif isinstance(self.config.threshold1, float):
-            threshold = self.config.threshold1
-        binarized_attention_map1 = torch.where(
-            sd_multi_scale_cross_attention_maps1 > threshold, 1., 0.)
-
-        if self.config.threshold2 == "mean+std":
-            threshold = sd_multi_scale_cross_attention_maps2.mean() + 1 * sd_multi_scale_cross_attention_maps2.std()
-        elif self.config.threshold2 == "mean+2std":
-            threshold = sd_multi_scale_cross_attention_maps2.mean() + 2 * sd_multi_scale_cross_attention_maps2.std()
-        elif isinstance(self.config.threshold2, float):
-            threshold = self.config.threshold2
-        binarized_attention_map2 = torch.where(
-            sd_multi_scale_cross_attention_maps2 > threshold, 1., 0.)
+        self.logger.experiment.add_image("test predicted mask 0", mask_grid_0, batch_idx)
+        self.logger.experiment.add_image("test predicted mask 1", mask_grid_1, batch_idx)
+        self.logger.experiment.add_image("test predicted mask 2", mask_grid_2, batch_idx)
+        self.logger.experiment.add_image("test masked image 0", masked_image_grid_0, batch_idx)
+        self.logger.experiment.add_image("test masked image 1", masked_image_grid_1, batch_idx)
+        self.logger.experiment.add_image("test masked image 2", masked_image_grid_2, batch_idx)
+        self.logger.experiment.add_image("test image", image_grid, batch_idx)
 
         if mask_provided:
             if self.config.use_crf:
                 crf_mask = torch.as_tensor(
                     crf((image[0].permute(1, 2, 0) * 255).type(torch.uint8).cpu().numpy().copy(
                         order='C'),
-                        torch.stack([binarized_attention_map1, binarized_attention_map1,
-                                     binarized_attention_map1],
+                        torch.stack([final_predicted_mask_0, final_predicted_mask_0,
+                                     final_predicted_mask_0],
                                     dim=2).type(torch.float).numpy()))[:, :, 0]
                 crf_masked_image_grid1 = torchvision.utils.make_grid(
                     image[0].cpu() * (1 - crf_mask[None, ...]).cpu() + crf_mask[None, ...])
-                iou1 = calculate_iou((torch.nn.functional.interpolate(crf_mask[None, None, ...],
-                                                                     self.config.mask_size)[0, 0] > 0).type(
-                    torch.uint8), (mask.cpu() > 0).type(torch.uint8))
+                iou_0 = calculate_iou((crf_mask > 0).type(torch.uint8), (mask.cpu() > 0).type(torch.uint8))
             else:
-                iou1 = calculate_iou((torch.nn.functional.interpolate(
-                    binarized_attention_map1[None, None, ...], self.config.mask_size)[0, 0] > 0).type(
-                    torch.uint8), (mask.cpu() > 0).type(torch.uint8))
-                iou2 = calculate_iou(
-                    (torch.nn.functional.interpolate(binarized_attention_map2[None, None, ...],
-                                                     self.config.mask_size)[0, 0] > 0).type(
-                        torch.uint8), (mask.cpu() > 0).type(torch.uint8))
+                iou_0 = calculate_iou((final_predicted_mask_0 > 0).type(torch.uint8),
+                                      (mask.cpu() > 0).type(torch.uint8))
+                iou_1 = calculate_iou((final_predicted_mask_1 > 0).type(torch.uint8),
+                                      (mask.cpu() > 0).type(torch.uint8))
+                iou_2 = calculate_iou((final_predicted_mask_2 > 0).type(torch.uint8),
+                                      (mask.cpu() > 0).type(torch.uint8))
             masks_grid = torchvision.utils.make_grid(mask[None, ...])
-
-        masked_image_grid1 = torchvision.utils.make_grid(
-            image[0].cpu() * (1 - binarized_attention_map1[None, ...]).cpu() + torch.stack(
-                [binarized_attention_map1 * 0, binarized_attention_map1 * 0, binarized_attention_map1], dim=0))
-        masked_image_grid2 = torchvision.utils.make_grid(
-            image[0].cpu() * (1 - binarized_attention_map2[None, ...]).cpu() + torch.stack(
-                [binarized_attention_map2 * 0, binarized_attention_map2 * 0, binarized_attention_map2], dim=0))
-
-        attention_grid1 = torchvision.utils.make_grid(sd_multi_scale_cross_attention_maps1)
-        attention_grid2 = torchvision.utils.make_grid(sd_multi_scale_cross_attention_maps2)
 
         if mask_provided:
             self.logger.experiment.add_image("test mask", masks_grid, batch_idx)
-            self.log("test iou1", iou1, on_step=True, sync_dist=True)
-            self.log("test iou2", iou2, on_step=True, sync_dist=True)
+            self.log("test iou 0", iou_0, on_step=True, sync_dist=True)
+            self.log("test iou 1", iou_1, on_step=True, sync_dist=True)
+            self.log("test iou 2", iou_2, on_step=True, sync_dist=True)
             if self.config.use_crf:
                 self.logger.experiment.add_image("test crf masked image1", crf_masked_image_grid1, batch_idx)
 
-        self.logger.experiment.add_image("test final masked image1", masked_image_grid1, batch_idx)
-        self.logger.experiment.add_image("test final masked image2", masked_image_grid2, batch_idx)
-
-        self.logger.experiment.add_image("test final attention maps1", attention_grid1, batch_idx)
-        self.logger.experiment.add_image("test final attention maps2", attention_grid2, batch_idx)
-
         return torch.tensor(0.)
-
-    # def on_save_checkpoint(self, checkpoint):
-    #     checkpoint['state_dict'] = self.upsizer.state_dict()
-    #
-    # def on_load_checkpoint(self, checkpoint) -> None:
-    #     self.upsizer.load_state_dict(checkpoint['state_dict'])
 
     def configure_optimizers(self):
         optimizer = getattr(optim, self.config.optimizer)(
