@@ -37,7 +37,7 @@ class StableDiffusion(nn.Module):
         self.tokenizer = CLIPTokenizer.from_pretrained(model_key, subfolder="tokenizer")
         self.text_encoder = CLIPTextModel.from_pretrained(model_key, subfolder="text_encoder")
         self.unet = UNet2DConditionModel.from_pretrained(model_key, subfolder="unet")
-
+        # del self.vae.decoder
         def freeze_params(params):
             for param in params:
                 param.requires_grad = False
@@ -126,7 +126,7 @@ class StableDiffusion(nn.Module):
 
         return uncond_embeddings, text_embeddings
 
-    def get_attention_map(self, raw_attention_maps, output_size=256, token_id=2, average_layers=True):
+    def get_attention_map(self, raw_attention_maps, output_size=256, token_ids=(2,), average_layers=True, train=True, apply_softmax=True):
         cross_attention_maps = {}
         self_attention_maps = {}
         resnets = {}
@@ -134,16 +134,43 @@ class StableDiffusion(nn.Module):
             if layer.endswith("attn2"):  # cross attentions
                 split_attention_maps = torch.stack(raw_attention_maps[layer].chunk(2), dim=0)
                 _, channel, img_embed_len, text_embed_len = split_attention_maps.shape
-                reshaped_split_attention_maps = split_attention_maps.softmax(dim=-1)[:, :, :, token_id].reshape(
-                    2,  # because of chunk
-                    channel,
-                    int(math.sqrt(img_embed_len)),
-                    int(math.sqrt(img_embed_len)),
-                )
+                if train:
+                    if apply_softmax:
+                        reshaped_split_attention_maps = split_attention_maps.softmax(dim=-1)[:, :, :, torch.tensor(list(token_ids))].reshape(
+                            2,  # because of chunk
+                            channel,
+                            int(math.sqrt(img_embed_len)),
+                            int(math.sqrt(img_embed_len)),
+                            len(token_ids),
+                        ).permute(0, 1, 4, 2, 3)
+                    else:
+                        reshaped_split_attention_maps = split_attention_maps[:, :, :,
+                                                        torch.tensor(list(token_ids))].reshape(
+                            2,  # because of chunk
+                            channel,
+                            int(math.sqrt(img_embed_len)),
+                            int(math.sqrt(img_embed_len)),
+                            len(token_ids),
+                        ).permute(0, 1, 4, 2, 3)
+                else:
+                    reshaped_split_attention_maps = split_attention_maps.softmax(dim=-1)[:, :, :,
+                                                    torch.tensor(list(token_ids))].reshape(
+                        2,  # because of chunk
+                        channel,
+                        int(math.sqrt(img_embed_len)),
+                        int(math.sqrt(img_embed_len)),
+                        len(token_ids),
+                    ).permute(0, 1, 4, 2, 3)
 
-                resized_reshaped_split_attention_maps = torch.nn.functional.interpolate(reshaped_split_attention_maps,
-                                                                                        size=output_size,
-                                                                                        mode='bilinear').mean(dim=1)
+                resized_reshaped_split_attention_maps_0 = torch.nn.functional.interpolate(
+                    reshaped_split_attention_maps[0],
+                    size=output_size,
+                    mode='bilinear').mean(dim=0)
+                resized_reshaped_split_attention_maps_1 = torch.nn.functional.interpolate(
+                    reshaped_split_attention_maps[1],
+                    size=output_size,
+                    mode='bilinear').mean(dim=0)
+                resized_reshaped_split_attention_maps = torch.stack([resized_reshaped_split_attention_maps_0, resized_reshaped_split_attention_maps_1], dim=0)
                 cross_attention_maps[layer] = resized_reshaped_split_attention_maps
 
             elif layer.endswith("attn1"):  # self attentions
@@ -183,7 +210,7 @@ class StableDiffusion(nn.Module):
 
     def train_step(self, text_embeddings, input_image, guidance_scale=100, t=None, back_propagate_loss=True,
                    generate_new_noise=True, phase=0, attention_map=None, loss_coef=1, latents=None,
-                   attention_output_size=256, token_id=2, average_layers=True):
+                   attention_output_size=256, token_ids=(2,), average_layers=True, train=True, apply_softmax=True):
 
         # torch.cuda.synchronize(); print(f'[TIME] guiding: interp {time.time() - _t:.4f}s')
         if not (input_image.shape[-2] == 512 and input_image.shape[-1] == 512):
@@ -221,7 +248,8 @@ class StableDiffusion(nn.Module):
 
         # torch.cuda.synchronize(); print(f'[TIME] guiding: unet {time.time() - _t:.4f}s')
         sd_cross_attention_maps1, sd_cross_attention_maps2, sd_self_attention_maps = self.get_attention_map(
-            self.attention_maps, output_size=attention_output_size, token_id=token_id, average_layers=average_layers)
+            self.attention_maps, output_size=attention_output_size, token_ids=token_ids, average_layers=average_layers, train=train, apply_softmax=apply_softmax)
+        self.attention_maps = {}
         # if not self.partial_run:
         #     # perform guidance (high scale from paper!)
         #     noise_pred_uncond, noise_pred_text = noise_pred_.chunk(2)
@@ -271,7 +299,8 @@ class StableDiffusion(nn.Module):
 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents = self.scheduler.step(noise_pred, t, latents)['prev_sample']
-                all_attention_maps.append(deepcopy(self.attention_maps))
+                if 10 <= i <= 25:
+                    all_attention_maps.append(deepcopy(self.attention_maps))
 
         return latents, all_attention_maps
 
@@ -307,7 +336,7 @@ class StableDiffusion(nn.Module):
 
         # Prompts -> text embeds
         text_embeds = self.get_text_embeds(prompts, negative_prompts)  # [2, 77, 768]
-
+        text_embeds = torch.cat(text_embeds, dim=0)
         # Text embeds -> img latents
         latents, all_attention_maps = self.produce_latents(text_embeds, height=height, width=width, latents=latents,
                                                            num_inference_steps=num_inference_steps,

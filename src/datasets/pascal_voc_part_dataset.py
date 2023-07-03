@@ -1,8 +1,5 @@
-import math
-import os
-from copy import deepcopy
 from typing import List
-from src.utils import get_square_cropping_coords
+from src.utils import get_square_cropping_coords, adjust_bbox_coords, get_bbox_data
 import numpy as np
 import pytorch_lightning as pl
 import torch.nn.functional
@@ -81,7 +78,7 @@ part_mapping = {
         'lfho': 'leg',
         'rbho': 'leg',
         'rfho': 'leg',
-        'lblleg': 'log',
+        'lblleg': 'leg',
         'lbuleg': 'leg',
         'lflleg': 'leg',
         'lfuleg': 'leg',
@@ -102,46 +99,35 @@ def get_file_dirs(annotation_file):
     return ann_file_path, img_file_path
 
 
-def get_bbox_data(mask):
-    ys, xs = np.where(mask == 1)
-    return xs.min(), xs.max(), ys.min(), ys.max()
-
-
-def adjust_bbox_coords(long_side_length, short_side_length, short_side_coord_min, short_side_coord_max,
-                       short_side_original_length):
-    margin = (long_side_length - short_side_length) / 2
-    short_side_coord_min -= math.ceil(margin)
-    short_side_coord_max += math.floor(margin)
-    short_side_coord_max -= min(0, short_side_coord_min)
-    short_side_coord_min = max(0, short_side_coord_min)
-    short_side_coord_min += min(short_side_original_length - short_side_coord_max, 0)
-    short_side_coord_max = min(short_side_original_length, short_side_coord_max)
-
-    return short_side_coord_min, short_side_coord_max
+object_size_thresh={"car": 50 * 50, "horse": 32 * 32, "dog": 32 * 32}
 
 
 class PascalVOCPartDataset(Dataset):
-    def __init__(self, ann_file_names, object_size_thresh={"car": 50 * 50, "horse": 32 * 32, "dog": 32 * 32},
-                 train=True, train_data_ids=(0,), num_crops=1, mask_size=256, blur_background=False,
-                 remove_overlapping_objects=False, object_overlapping_threshold=0.05):
+    def __init__(self, data_file_ids_file, object_name_to_return, part_names_to_return, object_size_thresh=50*50,
+                 train=True, train_data_ids=(0,), num_crops=1, mask_size=256,
+                 remove_overlapping_objects=False, object_overlapping_threshold=0.05, blur_background=False, fill_background_with_black=True, final_min_crop_size=256):
         super().__init__()
         self.train = train
         self.train_data_ids = train_data_ids
         self.num_crops = num_crops
         self.mask_size = mask_size
         self.blur_background = blur_background
+        self.fill_background_with_black = fill_background_with_black
         self.counter = 0
-        self.dataset_len = None
-        self.data = {}
-        self.object_name = None
-        self.part_names = None
+        self.data = []
+        self.part_names_to_return = part_names_to_return
         self.current_idx = None
-        self.object_part_data = []
+        self.final_min_crop_size = final_min_crop_size
         counter_ = 0
-        progress_bar = tqdm(ann_file_names)
+        with open(data_file_ids_file) as file:
+            data_file_ids = file.readlines()
+        progress_bar = tqdm(data_file_ids)
         progress_bar.set_description("preparing the data...")
-        for ann_file_name in progress_bar:
-            ann_file_path, img_file_path = get_file_dirs(ann_file_name)
+        for line in progress_bar:
+            ann_file_id, is_class_data = line.strip().split()
+            if is_class_data == "-1":
+                continue
+            ann_file_path, img_file_path = get_file_dirs(f"{ann_file_id}.mat")
             anns = io.loadmat(ann_file_path)['anno'][0, 0][1]
             num_objects = anns.shape[1]
             object_ids_to_remove = []
@@ -152,13 +138,13 @@ class PascalVOCPartDataset(Dataset):
                     if num_parts == 0:
                         continue
                     object_name = anns[0, object_id][0][0]
-                    if object_name not in ["car", "horse", "dog"]:
+                    if object_name != object_name_to_return:
                         continue
                     object_mask = anns[0, object_id][2]
                     x_min, x_max, y_min, y_max = get_bbox_data(object_mask)
                     width, height = (x_max - x_min), (y_max - y_min)
                     object_bbox_size = width * height
-                    if object_bbox_size < object_size_thresh[object_name]:
+                    if object_bbox_size < object_size_thresh:
                         continue
                     object_bbox_mask = np.zeros_like(object_mask)
                     object_bbox_mask[y_min:y_max, x_min:x_max] = 1
@@ -185,26 +171,32 @@ class PascalVOCPartDataset(Dataset):
                 if num_parts == 0:
                     continue
                 object_name = anns[0, object_id][0][0]
-                if object_name not in ["car", "horse", "dog"]:
+                if object_name != object_name_to_return:
                     continue
+                # data = self.data.get(object_name, [])
                 object_mask = anns[0, object_id][2]
                 x_min, x_max, y_min, y_max = get_bbox_data(object_mask)
                 width, height = (x_max - x_min), (y_max - y_min)
                 object_bbox_size = width * height
-                if object_bbox_size < object_size_thresh[object_name]:
+                if object_bbox_size < object_size_thresh:
                     continue
 
-                object_data = self.data.get(object_name, {})
+                # object_data = self.data.get(object_name, {})
                 aux_part_data = {}
-                non_body_part_data = []  # only for car object
+                includes_part = False
                 for part_id in range(num_parts):
                     part_name = anns[0, object_id][3][0][part_id][0][0]
-                    if object_name == "car" and part_mapping[object_name][part_name] != "body":
-                        non_body_part_data.append(part_id)
                     aux_data = aux_part_data.get(part_mapping[object_name][part_name], [])
                     aux_data.append(part_id)
                     aux_part_data[part_mapping[object_name][part_name]] = aux_data
-
+                    if part_mapping[object_name][part_name] != "body":
+                        aux_data = aux_part_data.get("non_body", [])
+                        aux_data.append(part_id)
+                        aux_part_data["non_body"] = aux_data
+                    if part_mapping[object_name][part_name] in self.part_names_to_return:
+                        includes_part = True
+                if not includes_part:
+                    continue
                 m_h, m_w = object_mask.shape
                 if width < height:
                     x_min, x_max = adjust_bbox_coords(height, width, x_min, x_max, m_w)
@@ -217,59 +209,24 @@ class PascalVOCPartDataset(Dataset):
                     x_min = max(0, x_min)
                     y_min = max(0, y_min)
 
-                for part_name in aux_part_data.keys():
-                    part_data = object_data.get(part_name, [])
-                    if part_name == "body":
-                        part_data.append({
-                            "file_name": ann_file_name,
-                            "object_id": object_id,
-                            "part_ids": aux_part_data[part_name],
-                            "bbox": [x_min, y_min, x_max, y_max],
-                            "non_body_part_ids": non_body_part_data
-                        })
-                    else:
-                        part_data.append({
-                            "file_name": ann_file_name,
-                            "object_id": object_id,
-                            "part_ids": aux_part_data[part_name],
-                            "bbox": [x_min, y_min, x_max, y_max],
-                            "non_body_part_ids": []
-                        })
-                    object_data[part_name] = part_data
-                self.data[object_name] = object_data
+                self.data.append({
+                    "file_name": f"{ann_file_id}.mat",
+                    "object_id": object_id,
+                    "part_data": aux_part_data,
+                    "bbox": [x_min, y_min, x_max, y_max],
+                })
+
         print("number of images with changed aspect ratio: ", counter_)
-
-    def get_object_names(self):
-        return sorted(list(self.data.keys()))
-
-    def get_object_part_names(self, object_name_to_get):
-        return sorted(list(self.data[object_name_to_get].keys()))
-
-    def setup(self, object_name, part_name, data_portion=1.):
-        self.object_part_data = self.data[object_name][part_name][
-                                :int(data_portion * len(self.data[object_name][part_name]))]
-
-    def set_dataset_len(self, dataset_len):
-        self.dataset_len = dataset_len
-
-    def set_num_crops(self, num_crops):
-        self.num_crops = num_crops
-
-    def set_train_data_ids(self, train_data_ids):
-        self.train_data_ids = train_data_ids
-
-    def set_train(self, train):
-        self.train = train
-
-    def set_blur_background(self, blur_background):
-        self.blur_background = blur_background
+        if train_data_ids != (0,):
+            selected_data = []
+            for id in train_data_ids:
+                selected_data.append(self.data[id])
+            self.data = selected_data
 
     def __getitem__(self, idx):
-        if self.train:
-            idx = self.train_data_ids[idx % len(self.train_data_ids)]
-
-        data = self.object_part_data[idx]
-        file_name, object_id, part_ids, bbox, non_body_part_ids = data["file_name"], data["object_id"], data["part_ids"], data["bbox"], data["non_body_part_ids"]
+        idx = idx // self.num_crops
+        data = self.data[idx]
+        file_name, object_id, part_data, bbox = data["file_name"], data["object_id"], data["part_data"], data["bbox"]
         ann_file_path, img_file_path = get_file_dirs(file_name)
         image = Image.open(img_file_path)
         data = io.loadmat(ann_file_path)
@@ -278,29 +235,38 @@ class PascalVOCPartDataset(Dataset):
             object_mask = anns[0, object_id][2]
             blurred_image = transforms.functional.gaussian_blur(image, 101, 10)
             image = Image.fromarray(np.where(object_mask[..., None] > 0, np.array(image), np.array(blurred_image)).astype(np.uint8))
-
-        mask = 0
-        for part_id in part_ids:
-            mask += anns[0, object_id][3][0][part_id][1]
+        if self.fill_background_with_black:
+            object_mask = anns[0, object_id][2]
+            image = Image.fromarray((np.array(image) * np.where(object_mask[..., None] > 0, 1, 0)).astype(np.uint8))
+        body_mask = 0
         non_body_mask = 0
-        for part_id in non_body_part_ids:
-            non_body_mask += anns[0, object_id][3][0][part_id][1]
-        mask = np.where(non_body_mask==1, 0, mask)
-        mask = np.where(mask > 0, 1, 0)
-        mask = mask[bbox[1]:bbox[3], bbox[0]:bbox[2]]
-        image = image.crop(bbox)
-        image = transforms.functional.resize(image, 512)
-        image = transforms.functional.to_tensor(image)
+        for idx, part_name in enumerate(self.part_names_to_return):
+            part_ids = part_data.get(part_name, None)
+            if part_ids is not None:
+                if part_name == "body":
+                    for part_id in part_ids:
+                        body_mask = np.where(anns[0, object_id][3][0][part_id][1] > 0, idx, body_mask)
+                    if part_data.get("non_body", False):
+                        for part_id in part_data["non_body"]:
+                            body_mask = np.where(anns[0, object_id][3][0][part_id][1] > 0, 0, body_mask)
+                else:
+                    for part_id in part_ids:
+                        non_body_mask = np.where(anns[0, object_id][3][0][part_id][1] > 0, idx, non_body_mask)
+        mask = non_body_mask + body_mask
 
-        mask = transforms.functional.resize(Image.fromarray((mask * 255).astype(np.uint8)), 512)
-        mask = transforms.functional.to_tensor(mask)[0]
-        mask = torch.where(mask >= 0.5, 1., 0.)
+        image = image.crop(bbox)
+        mask = mask[bbox[1]:bbox[3], bbox[0]:bbox[2]]
+
         if self.train:
+            image = transforms.functional.resize(image, (512, 512))
+            image = transforms.functional.to_tensor(image)
+            mask = transforms.functional.resize(torch.as_tensor(mask)[None, ...], size=(512, 512),
+                                                interpolation=transforms.InterpolationMode.NEAREST)[0].type(torch.uint8)
             coords = []
             if self.num_crops > 1:
-                x_start, x_end, y_start, y_end, crop_size = get_square_cropping_coords(mask)
+                x_start, x_end, y_start, y_end, crop_size = get_square_cropping_coords(torch.where(mask>0, 1, 0))
                 for square_size in torch.linspace(crop_size, 512, self.num_crops + 1)[1:-1]:
-                    x_start, x_end, y_start, y_end, crop_size = get_square_cropping_coords(mask,
+                    x_start, x_end, y_start, y_end, crop_size = get_square_cropping_coords(torch.where(mask>0, 1, 0),
                                                                                            square_size=int(square_size))
                     coords.append([y_start, y_end, x_start, x_end])
             coords.append([0, 512, 0, 512])
@@ -308,66 +274,95 @@ class PascalVOCPartDataset(Dataset):
             y_start, y_end, x_start, x_end = coords[random_idx]
             cropped_mask = mask[y_start:y_end, x_start:x_end]
             cropped_mask = \
-                torch.nn.functional.interpolate(cropped_mask[None, None, ...], size=self.mask_size, mode="nearest")[
-                    0, 0]
+                torch.nn.functional.interpolate(cropped_mask[None, None, ...], size=512, mode="nearest")[
+                    0, 0].type(torch.float)
             cropped_image = image[:, y_start:y_end, x_start:x_end]
             cropped_image = torch.nn.functional.interpolate(cropped_image[None, ...], size=512, mode="bilinear")[0]
-            return cropped_image, cropped_mask, cropped_mask / 10
+            mask_in_crop = False
+            while not mask_in_crop:
+                crop_size = int((self.final_min_crop_size + torch.rand(1) * (512 - self.final_min_crop_size)).item())
+                y, x, h, w = transforms.RandomCrop.get_params(cropped_image, output_size=(crop_size, crop_size))
+                final_cropped_mask = cropped_mask[y:y + h, x:x + w]
+                if torch.sum(torch.where(final_cropped_mask > 0, 1, 0)) > 512:
+                    mask_in_crop = True
+            final_cropped_image = cropped_image[:, y:y + h, x:x + w]
+            final_cropped_image = \
+            torch.nn.functional.interpolate(final_cropped_image[None, ...], size=512, mode="bilinear")[0]
+            final_cropped_mask = \
+            torch.nn.functional.interpolate(final_cropped_mask[None, None, ...], size=self.mask_size, mode="nearest")[
+                0, 0]
+            return final_cropped_image, final_cropped_mask, final_cropped_mask / 10
         else:
+            image = transforms.functional.resize(image, 512)
+            image = transforms.functional.to_tensor(image)
+            mask = transforms.functional.resize(torch.as_tensor(mask)[None, ...], size=512,
+                                                interpolation=transforms.InterpolationMode.NEAREST)[0].type(torch.uint8)
             return image, mask
 
     def __len__(self):
-        if self.dataset_len is not None:
-            return self.dataset_len
-        return len(self.object_part_data)
+        return self.num_crops * len(self.data)
 
 
 class PascalVOCPartDataModule(pl.LightningDataModule):
     def __init__(
             self,
-            annotations_files_dir: str = "./data",
+            train_data_file_ids_file: str = "./data",
+            val_data_file_ids_file: str = "./data",
             object_name: str = "car",
-            part_name: str = "window",
+            train_part_names: List[str] = [""],
+            test_part_names: List[str] = [""],
             train_num_crops: int = 1,
             batch_size: int = 1,
             train_data_ids: List[int] = (2,),
             mask_size: int = 256,
             blur_background: bool = False,
+            fill_background_with_black: bool = False,
             remove_overlapping_objects: bool = False,
             object_overlapping_threshold: float = 0.05,
-            data_portion: float = 1.0,
     ):
         super().__init__()
-        self.annotations_files_dir = annotations_files_dir
+        self.train_data_file_ids_file = train_data_file_ids_file
+        self.val_data_file_ids_file = val_data_file_ids_file
         self.object_name = object_name
-        self.part_name = part_name
+        self.train_part_names = train_part_names
+        self.test_part_names = test_part_names
         self.train_num_crops = train_num_crops
         self.batch_size = batch_size
         self.train_data_ids = train_data_ids
         self.mask_size = mask_size
         self.blur_background = blur_background
+        self.fill_background_with_black = fill_background_with_black
         self.remove_overlapping_objects = remove_overlapping_objects
         self.object_overlapping_threshold = object_overlapping_threshold
-        self.data_portion = data_portion
 
     def setup(self, stage: str):
-        self.train_dataset = PascalVOCPartDataset(
-            ann_file_names=os.listdir(self.annotations_files_dir),
-            mask_size=self.mask_size,
-            blur_background=False,
-            remove_overlapping_objects=self.remove_overlapping_objects,
-            object_overlapping_threshold=self.object_overlapping_threshold,
-        )
-        self.train_dataset.setup(self.object_name, self.part_name, data_portion=self.data_portion)
-        self.test_dataset = deepcopy(self.train_dataset)
-
-        self.train_dataset.set_train_data_ids(self.train_data_ids)
-        self.train_dataset.set_dataset_len(len(self.train_data_ids) * self.train_num_crops)
-        self.train_dataset.set_num_crops(self.train_num_crops)
-        self.train_dataset.set_train(True)
-
-        self.test_dataset.set_train(False)
-        self.test_dataset.set_blur_background(self.blur_background)
+        if stage == "fit":
+            self.train_dataset = PascalVOCPartDataset(
+                data_file_ids_file=self.train_data_file_ids_file,
+                object_name_to_return=self.object_name,
+                part_names_to_return=self.train_part_names,
+                object_size_thresh=object_size_thresh[self.object_name],
+                train=True,
+                train_data_ids=self.train_data_ids,
+                num_crops=self.train_num_crops,
+                mask_size=self.mask_size,
+                remove_overlapping_objects=self.remove_overlapping_objects,
+                object_overlapping_threshold=self.object_overlapping_threshold,
+                blur_background=self.blur_background,
+                fill_background_with_black=self.fill_background_with_black
+            )
+        elif stage == "test":
+            self.test_dataset = PascalVOCPartDataset(
+                data_file_ids_file=self.val_data_file_ids_file,
+                object_name_to_return=self.object_name,
+                part_names_to_return=self.test_part_names,
+                object_size_thresh=object_size_thresh[self.object_name],
+                train=False,
+                remove_overlapping_objects=self.remove_overlapping_objects,
+                object_overlapping_threshold=self.object_overlapping_threshold,
+                blur_background=self.blur_background,
+                fill_background_with_black=self.fill_background_with_black
+            )
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=1, shuffle=True)

@@ -6,6 +6,7 @@ from src.co_part_segmentation_trainer import (
 from src.config import Config
 from src.datasets.pascal_voc_part_dataset import PascalVOCPartDataModule
 from src.datasets.sample_dataset import SampleDataModule
+from src.datasets.celeba_hq_dataset import CelebaHQDataModule
 
 
 def main():
@@ -15,25 +16,40 @@ def main():
         dm = SampleDataModule(
             src_image_dirs=config.src_image_paths,
             target_image_dir=config.target_image_path,
-            src_segmentation_dirs=config.src_segmentation_paths,
+            src_mask_dirs=config.src_mask_paths,
             train_num_crops=config.train_num_crops,
-            test_num_crops=config.test_num_crops,
             batch_size=config.batch_size,
             mask_size=config.mask_size,
         )
     elif config.dataset == "pascal":
         dm = PascalVOCPartDataModule(
-            annotations_files_dir=config.annotations_files_dir,
+            train_data_file_ids_file=config.train_data_file_ids_file,
+            val_data_file_ids_file=config.val_data_file_ids_file,
             object_name=config.object_name,
-            part_name=config.part_name,
+            train_part_names=config.train_part_names,
+            test_part_names=config.test_part_names,
             train_num_crops=config.train_num_crops,
             batch_size=config.batch_size,
             train_data_ids=config.train_data_ids,
             mask_size=config.mask_size,
             blur_background=config.blur_background,
+            fill_background_with_black=config.fill_background_with_black,
             remove_overlapping_objects=config.remove_overlapping_objects,
             object_overlapping_threshold=config.object_overlapping_threshold,
-            data_portion=config.data_portion,
+        )
+    elif config.dataset == "celeba-hq":
+        dm = CelebaHQDataModule(
+            images_dir=config.images_dir,
+            masks_dir=config.masks_dir,
+            idx_mapping_file=config.idx_mapping_file,
+            test_file_names_file_path=config.test_file_names_file_path,
+            non_test_file_names_file_path=config.non_test_file_names_file_path,
+            train_num_crops=config.train_num_crops,
+            train_parts_to_return=config.train_parts_to_return,
+            test_parts_to_return=config.test_parts_to_return,
+            batch_size=config.batch_size,
+            mask_size=config.mask_size,
+            train_data_ids=config.train_data_ids,
         )
     model = CoSegmenterTrainer(config=config)
     trainer = pl.Trainer(
@@ -44,8 +60,8 @@ def main():
         devices=config.gpu_id,
         # precision=16,
         log_every_n_steps=1,
-        accumulate_grad_batches=config.train_num_crops // config.batch_size,
-        enable_checkpointing=False
+        # accumulate_grad_batches=config.train_num_crops // config.batch_size,
+        enable_checkpointing=False,
     )
     if config.train:
         trainer.fit(model=model, datamodule=dm)
