@@ -1,5 +1,8 @@
 from typing import List
-from src.utils import get_square_cropping_coords, adjust_bbox_coords, get_bbox_data
+
+import cv2
+
+from src.utils import adjust_bbox_coords, get_bbox_data
 import numpy as np
 import pytorch_lightning as pl
 import torch.nn.functional
@@ -10,7 +13,8 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 from tqdm import tqdm
 
-import random
+import albumentations as A
+import math
 
 part_mapping = {
     'dog': {
@@ -103,13 +107,27 @@ object_size_thresh={"car": 50 * 50, "horse": 32 * 32, "dog": 32 * 32}
 
 
 class PascalVOCPartDataset(Dataset):
-    def __init__(self, data_file_ids_file, object_name_to_return, part_names_to_return, object_size_thresh=50*50,
-                 train=True, train_data_ids=(0,), num_crops=1, mask_size=256,
-                 remove_overlapping_objects=False, object_overlapping_threshold=0.05, blur_background=False, fill_background_with_black=True, final_min_crop_size=256):
+    def __init__(
+            self,
+            data_file_ids_file,
+            object_name_to_return,
+            part_names_to_return,
+            object_size_thresh=50*50,
+            train=True,
+            train_data_ids=(0,),
+            mask_size=256,
+            remove_overlapping_objects=False,
+            object_overlapping_threshold=0.05,
+            blur_background=False,
+            fill_background_with_black=True,
+            final_min_crop_size=512,
+            single_object=True,
+            adjust_bounding_box=False,
+            zero_pad_test_output=False
+    ):
         super().__init__()
         self.train = train
         self.train_data_ids = train_data_ids
-        self.num_crops = num_crops
         self.mask_size = mask_size
         self.blur_background = blur_background
         self.fill_background_with_black = fill_background_with_black
@@ -118,6 +136,8 @@ class PascalVOCPartDataset(Dataset):
         self.part_names_to_return = part_names_to_return
         self.current_idx = None
         self.final_min_crop_size = final_min_crop_size
+        self.single_object = single_object
+        self.zero_pad_test_output = zero_pad_test_output
         counter_ = 0
         with open(data_file_ids_file) as file:
             data_file_ids = file.readlines()
@@ -134,18 +154,8 @@ class PascalVOCPartDataset(Dataset):
             if remove_overlapping_objects:
                 object_bbox_masks = []
                 for object_id in range(num_objects):
-                    num_parts = anns[0, object_id][3].shape[1]
-                    if num_parts == 0:
-                        continue
-                    object_name = anns[0, object_id][0][0]
-                    if object_name != object_name_to_return:
-                        continue
                     object_mask = anns[0, object_id][2]
                     x_min, x_max, y_min, y_max = get_bbox_data(object_mask)
-                    width, height = (x_max - x_min), (y_max - y_min)
-                    object_bbox_size = width * height
-                    if object_bbox_size < object_size_thresh:
-                        continue
                     object_bbox_mask = np.zeros_like(object_mask)
                     object_bbox_mask[y_min:y_max, x_min:x_max] = 1
                     object_bbox_masks.append(object_bbox_mask)
@@ -164,58 +174,102 @@ class PascalVOCPartDataset(Dataset):
                     object_ids_to_remove += np.concatenate([ys, xs]).tolist()
             if len(object_ids_to_remove) > 0:
                 print(object_ids_to_remove)
-            for object_id in range(num_objects):
-                if object_id in object_ids_to_remove:
-                    continue
-                num_parts = anns[0, object_id][3].shape[1]
-                if num_parts == 0:
-                    continue
-                object_name = anns[0, object_id][0][0]
-                if object_name != object_name_to_return:
-                    continue
-                # data = self.data.get(object_name, [])
-                object_mask = anns[0, object_id][2]
-                x_min, x_max, y_min, y_max = get_bbox_data(object_mask)
-                width, height = (x_max - x_min), (y_max - y_min)
-                object_bbox_size = width * height
-                if object_bbox_size < object_size_thresh:
-                    continue
-
-                # object_data = self.data.get(object_name, {})
+            if self.single_object:
                 aux_part_data = {}
+                data = []
+                for object_id in range(num_objects):
+                    if object_id in object_ids_to_remove:
+                        continue
+                    num_parts = anns[0, object_id][3].shape[1]
+                    if num_parts == 0:
+                        continue
+                    object_name = anns[0, object_id][0][0]
+                    if object_name != object_name_to_return:
+                        continue
+                    object_mask = anns[0, object_id][2]
+                    x_min, x_max, y_min, y_max = get_bbox_data(object_mask)
+                    width, height = (x_max - x_min), (y_max - y_min)
+                    object_bbox_size = width * height
+                    if object_bbox_size < object_size_thresh:
+                        continue
+
+                    includes_part = False
+                    for part_id in range(num_parts):
+                        part_name = anns[0, object_id][3][0][part_id][0][0]
+                        aux_data = aux_part_data.get(part_mapping[object_name][part_name], [])
+                        aux_data.append((object_id, part_id))
+                        aux_part_data[part_mapping[object_name][part_name]] = aux_data
+                        if part_mapping[object_name][part_name] != "body":
+                            aux_data = aux_part_data.get("non_body", [])
+                            aux_data.append((object_id, part_id))
+                            aux_part_data["non_body"] = aux_data
+                        if part_mapping[object_name][part_name] in self.part_names_to_return:
+                            includes_part = True
+                    if not includes_part:
+                        continue
+                    if adjust_bounding_box:
+                        m_h, m_w = object_mask.shape
+                        if width < height:
+                            x_min, x_max = adjust_bbox_coords(height, width, x_min, x_max, m_w)
+
+                        elif width > height:
+                            y_min, y_max = adjust_bbox_coords(width, height, y_min, y_max, m_h)
+
+                        if x_min < 0 or y_min < 0:
+                            counter_ += 1
+                            x_min = max(0, x_min)
+                            y_min = max(0, y_min)
+
+                    data.append({
+                        "file_name": f"{ann_file_id}.mat",
+                        "object_id": object_id,
+                        "bbox": [x_min, y_min, x_max, y_max],
+                    })
+                for i in range(len(data)):
+                    data[i]["part_data"] = aux_part_data
+                    self.data.append(data[i])
+
+            else:
+                whole_objects_mask = 0
                 includes_part = False
-                for part_id in range(num_parts):
-                    part_name = anns[0, object_id][3][0][part_id][0][0]
-                    aux_data = aux_part_data.get(part_mapping[object_name][part_name], [])
-                    aux_data.append(part_id)
-                    aux_part_data[part_mapping[object_name][part_name]] = aux_data
-                    if part_mapping[object_name][part_name] != "body":
-                        aux_data = aux_part_data.get("non_body", [])
+                objects_data = {}
+                for object_id in range(num_objects):
+                    if object_id in object_ids_to_remove:
+                        continue
+                    num_parts = anns[0, object_id][3].shape[1]
+                    if num_parts == 0:
+                        continue
+                    object_name = anns[0, object_id][0][0]
+                    if object_name != object_name_to_return:
+                        continue
+                    object_mask = anns[0, object_id][2]
+                    whole_objects_mask += object_mask
+                    x_min, x_max, y_min, y_max = get_bbox_data(object_mask)
+                    width, height = (x_max - x_min), (y_max - y_min)
+                    object_bbox_size = width * height
+                    if object_bbox_size < object_size_thresh:
+                        continue
+                    aux_part_data = {}
+                    for part_id in range(num_parts):
+                        part_name = anns[0, object_id][3][0][part_id][0][0]
+                        aux_data = aux_part_data.get(part_mapping[object_name][part_name], [])
                         aux_data.append(part_id)
-                        aux_part_data["non_body"] = aux_data
-                    if part_mapping[object_name][part_name] in self.part_names_to_return:
-                        includes_part = True
+                        aux_part_data[part_mapping[object_name][part_name]] = aux_data
+                        if part_mapping[object_name][part_name] != "body":
+                            aux_data = aux_part_data.get("non_body", [])
+                            aux_data.append(part_id)
+                            aux_part_data["non_body"] = aux_data
+                        if part_mapping[object_name][part_name] in self.part_names_to_return:
+                            includes_part = True
+                    objects_data[object_id] = aux_part_data
                 if not includes_part:
                     continue
-                m_h, m_w = object_mask.shape
-                if width < height:
-                    x_min, x_max = adjust_bbox_coords(height, width, x_min, x_max, m_w)
-
-                elif width > height:
-                    y_min, y_max = adjust_bbox_coords(width, height, y_min, y_max, m_h)
-
-                if x_min < 0 or y_min < 0:
-                    counter_ += 1
-                    x_min = max(0, x_min)
-                    y_min = max(0, y_min)
-
+                x_min, x_max, y_min, y_max = get_bbox_data(np.where(whole_objects_mask > 0, 1, 0))
                 self.data.append({
                     "file_name": f"{ann_file_id}.mat",
-                    "object_id": object_id,
-                    "part_data": aux_part_data,
+                    "part_data": objects_data,
                     "bbox": [x_min, y_min, x_max, y_max],
                 })
-
         print("number of images with changed aspect ratio: ", counter_)
         if train_data_ids != (0,):
             selected_data = []
@@ -223,84 +277,100 @@ class PascalVOCPartDataset(Dataset):
                 selected_data.append(self.data[id])
             self.data = selected_data
 
+        self.train_transform = A.Compose([
+                A.LongestMaxSize(512),
+                A.PadIfNeeded(512, 512, border_mode=cv2.BORDER_CONSTANT, value=0,
+                              mask_value=0),
+                A.HorizontalFlip(),
+                A.RandomScale((0.5, 2), always_apply=True),
+                A.RandomResizedCrop(512, 512, (0.5, 1)),
+                A.Rotate((-10, 10), border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0),
+            ])
+        if zero_pad_test_output:
+            self.test_transform = A.Compose([
+                A.LongestMaxSize(512),
+                A.PadIfNeeded(512, 512, border_mode=cv2.BORDER_CONSTANT, value=0,
+                              mask_value=0),
+            ])
+        else:
+            self.test_transform = A.Compose([
+                A.SmallestMaxSize(512),
+            ])
+
     def __getitem__(self, idx):
-        idx = idx // self.num_crops
         data = self.data[idx]
-        file_name, object_id, part_data, bbox = data["file_name"], data["object_id"], data["part_data"], data["bbox"]
+        if self.single_object:
+            file_name, object_id, part_data, bbox = data["file_name"], data["object_id"], data["part_data"], data["bbox"]
+        else:
+            file_name, part_data, bbox = data["file_name"], data["part_data"], data["bbox"]
         ann_file_path, img_file_path = get_file_dirs(file_name)
         image = Image.open(img_file_path)
         data = io.loadmat(ann_file_path)
         anns = data['anno'][0, 0][1]
+        if self.single_object:
+            body_mask = 0
+            non_body_mask = 0
+            for idx, part_name in enumerate(self.part_names_to_return):
+                part_ids = part_data.get(part_name, None)
+                if part_ids is not None:
+                    if part_name == "body":
+                        for object_id, part_id in part_ids:
+                            body_mask = np.where(anns[0, object_id][3][0][part_id][1] > 0, idx, body_mask)
+                        if part_data.get("non_body", False):
+                            for object_id, part_id in part_data["non_body"]:
+                                body_mask = np.where(anns[0, object_id][3][0][part_id][1] > 0, 0, body_mask)
+                    else:
+                        for object_id, part_id in part_ids:
+                            non_body_mask = np.where(anns[0, object_id][3][0][part_id][1] > 0, idx, non_body_mask)
+            mask = non_body_mask + body_mask
+            whole_mask = anns[0, object_id][2]  # object mask
+        else:
+            whole_mask = 0
+            body_mask = 0
+            non_body_mask = 0
+            for object_id in part_data:
+                for idx, part_name in enumerate(self.part_names_to_return):
+                    part_ids = part_data[object_id].get(part_name, None)
+                    if part_ids is not None:
+                        if part_name == "body":
+                            for part_id in part_ids:
+                                body_mask = np.where(anns[0, object_id][3][0][part_id][1] > 0, idx, body_mask)
+                            if part_data.get("non_body", False):
+                                for part_id in part_data["non_body"]:
+                                    body_mask = np.where(anns[0, object_id][3][0][part_id][1] > 0, 0, body_mask)
+                        else:
+                            for part_id in part_ids:
+                                non_body_mask = np.where(anns[0, object_id][3][0][part_id][1] > 0, idx, non_body_mask)
+                object_mask = anns[0, object_id][2]
+                whole_mask += object_mask
+            mask = non_body_mask + body_mask
+
         if self.blur_background:
-            object_mask = anns[0, object_id][2]
             blurred_image = transforms.functional.gaussian_blur(image, 101, 10)
-            image = Image.fromarray(np.where(object_mask[..., None] > 0, np.array(image), np.array(blurred_image)).astype(np.uint8))
+            image = Image.fromarray(np.where(whole_mask[..., None] > 0, np.array(image), np.array(blurred_image)).astype(np.uint8))
         if self.fill_background_with_black:
-            object_mask = anns[0, object_id][2]
-            image = Image.fromarray((np.array(image) * np.where(object_mask[..., None] > 0, 1, 0)).astype(np.uint8))
-        body_mask = 0
-        non_body_mask = 0
-        for idx, part_name in enumerate(self.part_names_to_return):
-            part_ids = part_data.get(part_name, None)
-            if part_ids is not None:
-                if part_name == "body":
-                    for part_id in part_ids:
-                        body_mask = np.where(anns[0, object_id][3][0][part_id][1] > 0, idx, body_mask)
-                    if part_data.get("non_body", False):
-                        for part_id in part_data["non_body"]:
-                            body_mask = np.where(anns[0, object_id][3][0][part_id][1] > 0, 0, body_mask)
-                else:
-                    for part_id in part_ids:
-                        non_body_mask = np.where(anns[0, object_id][3][0][part_id][1] > 0, idx, non_body_mask)
-        mask = non_body_mask + body_mask
+            image = Image.fromarray((np.array(image) * np.where(whole_mask[..., None] > 0, 1, 0)).astype(np.uint8))
 
         image = image.crop(bbox)
         mask = mask[bbox[1]:bbox[3], bbox[0]:bbox[2]]
 
         if self.train:
-            image = transforms.functional.resize(image, (512, 512))
-            image = transforms.functional.to_tensor(image)
-            mask = transforms.functional.resize(torch.as_tensor(mask)[None, ...], size=(512, 512),
-                                                interpolation=transforms.InterpolationMode.NEAREST)[0].type(torch.uint8)
-            coords = []
-            if self.num_crops > 1:
-                x_start, x_end, y_start, y_end, crop_size = get_square_cropping_coords(torch.where(mask>0, 1, 0))
-                for square_size in torch.linspace(crop_size, 512, self.num_crops + 1)[1:-1]:
-                    x_start, x_end, y_start, y_end, crop_size = get_square_cropping_coords(torch.where(mask>0, 1, 0),
-                                                                                           square_size=int(square_size))
-                    coords.append([y_start, y_end, x_start, x_end])
-            coords.append([0, 512, 0, 512])
-            random_idx = random.randint(0, self.num_crops - 1)
-            y_start, y_end, x_start, x_end = coords[random_idx]
-            cropped_mask = mask[y_start:y_end, x_start:x_end]
-            cropped_mask = \
-                torch.nn.functional.interpolate(cropped_mask[None, None, ...], size=512, mode="nearest")[
-                    0, 0].type(torch.float)
-            cropped_image = image[:, y_start:y_end, x_start:x_end]
-            cropped_image = torch.nn.functional.interpolate(cropped_image[None, ...], size=512, mode="bilinear")[0]
-            mask_in_crop = False
-            while not mask_in_crop:
-                crop_size = int((self.final_min_crop_size + torch.rand(1) * (512 - self.final_min_crop_size)).item())
-                y, x, h, w = transforms.RandomCrop.get_params(cropped_image, output_size=(crop_size, crop_size))
-                final_cropped_mask = cropped_mask[y:y + h, x:x + w]
-                if torch.sum(torch.where(final_cropped_mask > 0, 1, 0)) > 512:
-                    mask_in_crop = True
-            final_cropped_image = cropped_image[:, y:y + h, x:x + w]
-            final_cropped_image = \
-            torch.nn.functional.interpolate(final_cropped_image[None, ...], size=512, mode="bilinear")[0]
-            final_cropped_mask = \
-            torch.nn.functional.interpolate(final_cropped_mask[None, None, ...], size=self.mask_size, mode="nearest")[
-                0, 0]
-            return final_cropped_image, final_cropped_mask, final_cropped_mask / 10
+
+            result = self.train_transform(image=np.array(image), mask=mask)
+            image = result["image"]
+            mask = torch.as_tensor(result["mask"])
+            mask = \
+            torch.nn.functional.interpolate(mask[None, None, ...].type(torch.float), self.mask_size, mode="nearest")[0, 0]
+
+            return image, mask
         else:
-            image = transforms.functional.resize(image, 512)
-            image = transforms.functional.to_tensor(image)
-            mask = transforms.functional.resize(torch.as_tensor(mask)[None, ...], size=512,
-                                                interpolation=transforms.InterpolationMode.NEAREST)[0].type(torch.uint8)
+            result = self.test_transform(image=np.array(image), mask=mask)
+            image = result["image"]
+            mask = torch.as_tensor(result["mask"])
             return image, mask
 
     def __len__(self):
-        return self.num_crops * len(self.data)
+        return len(self.data)
 
 
 class PascalVOCPartDataModule(pl.LightningDataModule):
@@ -319,6 +389,10 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
             fill_background_with_black: bool = False,
             remove_overlapping_objects: bool = False,
             object_overlapping_threshold: float = 0.05,
+            final_min_crop_size: int = 512,
+            single_object: bool = True,
+            adjust_bounding_box: bool = False,
+            zero_pad_test_output: bool = False
     ):
         super().__init__()
         self.train_data_file_ids_file = train_data_file_ids_file
@@ -334,6 +408,10 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
         self.fill_background_with_black = fill_background_with_black
         self.remove_overlapping_objects = remove_overlapping_objects
         self.object_overlapping_threshold = object_overlapping_threshold
+        self.final_min_crop_size = final_min_crop_size
+        self.single_object = single_object
+        self.adjust_bounding_box = adjust_bounding_box
+        self.zero_pad_test_output = zero_pad_test_output
 
     def setup(self, stage: str):
         if stage == "fit":
@@ -344,12 +422,14 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
                 object_size_thresh=object_size_thresh[self.object_name],
                 train=True,
                 train_data_ids=self.train_data_ids,
-                num_crops=self.train_num_crops,
                 mask_size=self.mask_size,
                 remove_overlapping_objects=self.remove_overlapping_objects,
                 object_overlapping_threshold=self.object_overlapping_threshold,
                 blur_background=self.blur_background,
-                fill_background_with_black=self.fill_background_with_black
+                fill_background_with_black=self.fill_background_with_black,
+                final_min_crop_size=self.final_min_crop_size,
+                single_object=self.single_object,
+                adjust_bounding_box=self.adjust_bounding_box,
             )
         elif stage == "test":
             self.test_dataset = PascalVOCPartDataset(
@@ -361,7 +441,11 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
                 remove_overlapping_objects=self.remove_overlapping_objects,
                 object_overlapping_threshold=self.object_overlapping_threshold,
                 blur_background=self.blur_background,
-                fill_background_with_black=self.fill_background_with_black
+                fill_background_with_black=self.fill_background_with_black,
+                final_min_crop_size=self.final_min_crop_size,
+                single_object=self.single_object,
+                adjust_bounding_box=self.adjust_bounding_box,
+                zero_pad_test_output=self.zero_pad_test_output,
             )
 
     def train_dataloader(self):
