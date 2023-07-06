@@ -7,6 +7,7 @@ from src.config import Config
 from src.datasets.pascal_voc_part_dataset import PascalVOCPartDataModule
 from src.datasets.sample_dataset import SampleDataModule
 from src.datasets.celeba_hq_dataset import CelebaHQDataModule
+from src.datasets.paper_test_sample_dataset import PaperTestSampleDataModule
 
 
 def main():
@@ -36,6 +37,10 @@ def main():
             fill_background_with_black=config.fill_background_with_black,
             remove_overlapping_objects=config.remove_overlapping_objects,
             object_overlapping_threshold=config.object_overlapping_threshold,
+            final_min_crop_size=config.final_min_crop_size,
+            single_object=config.single_object,
+            adjust_bounding_box=config.adjust_bounding_box,
+            zero_pad_test_output=config.zero_pad_test_output,
         )
     elif config.dataset == "celeba-hq":
         dm = CelebaHQDataModule(
@@ -44,12 +49,17 @@ def main():
             idx_mapping_file=config.idx_mapping_file,
             test_file_names_file_path=config.test_file_names_file_path,
             non_test_file_names_file_path=config.non_test_file_names_file_path,
-            train_num_crops=config.train_num_crops,
-            train_parts_to_return=config.train_parts_to_return,
-            test_parts_to_return=config.test_parts_to_return,
+            train_part_names=config.train_part_names,
+            test_part_names=config.test_part_names,
             batch_size=config.batch_size,
             mask_size=config.mask_size,
             train_data_ids=config.train_data_ids,
+        )
+    elif config.dataset == "paper_test":
+        dm = PaperTestSampleDataModule(
+            test_images_dir=config.test_images_dir,
+            test_masks_dir=config.test_masks_dir,
+            mask_size=config.mask_size
         )
     model = CoSegmenterTrainer(config=config)
     trainer = pl.Trainer(
@@ -65,7 +75,7 @@ def main():
     )
     if config.train:
         trainer.fit(model=model, datamodule=dm)
-        trainer.test(model=model, datamodule=dm)
+        # trainer.test(model=model, datamodule=dm)
     else:
         trainer.test(model=model, datamodule=dm)
 
