@@ -1,4 +1,4 @@
-from typing import List
+from typing import Tuple
 
 import cv2
 
@@ -14,7 +14,7 @@ from torchvision import transforms
 from tqdm import tqdm
 
 import albumentations as A
-import math
+from albumentations.pytorch import ToTensorV2
 
 part_mapping = {
     'dog': {
@@ -278,23 +278,28 @@ class PascalVOCPartDataset(Dataset):
             self.data = selected_data
 
         self.train_transform = A.Compose([
-                A.LongestMaxSize(512),
-                A.PadIfNeeded(512, 512, border_mode=cv2.BORDER_CONSTANT, value=0,
-                              mask_value=0),
+                A.Resize(512, 512),
+                # A.LongestMaxSize(512),
+                # A.PadIfNeeded(512, 512, border_mode=cv2.BORDER_CONSTANT, value=0,
+                #               mask_value=0),
                 A.HorizontalFlip(),
                 A.RandomScale((0.5, 2), always_apply=True),
                 A.RandomResizedCrop(512, 512, (0.5, 1)),
                 A.Rotate((-10, 10), border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0),
+                ToTensorV2()
             ])
         if zero_pad_test_output:
             self.test_transform = A.Compose([
                 A.LongestMaxSize(512),
                 A.PadIfNeeded(512, 512, border_mode=cv2.BORDER_CONSTANT, value=0,
                               mask_value=0),
+                ToTensorV2()
             ])
         else:
             self.test_transform = A.Compose([
-                A.SmallestMaxSize(512),
+                # A.SmallestMaxSize(512),
+                A.Resize(512, 512),
+                ToTensorV2()
             ])
 
     def __getitem__(self, idx):
@@ -361,13 +366,12 @@ class PascalVOCPartDataset(Dataset):
             mask = torch.as_tensor(result["mask"])
             mask = \
             torch.nn.functional.interpolate(mask[None, None, ...].type(torch.float), self.mask_size, mode="nearest")[0, 0]
-
-            return image, mask
+            return image/255, mask
         else:
             result = self.test_transform(image=np.array(image), mask=mask)
             image = result["image"]
             mask = torch.as_tensor(result["mask"])
-            return image, mask
+            return image/255, mask
 
     def __len__(self):
         return len(self.data)
@@ -379,11 +383,11 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
             train_data_file_ids_file: str = "./data",
             val_data_file_ids_file: str = "./data",
             object_name: str = "car",
-            train_part_names: List[str] = [""],
-            test_part_names: List[str] = [""],
-            train_num_crops: int = 1,
+            train_part_names: Tuple[str] = [""],
+            test_part_names: Tuple[str] = [""],
             batch_size: int = 1,
-            train_data_ids: List[int] = (2,),
+            train_data_ids: Tuple[int] = (2,),
+            val_data_ids: Tuple[int] = (2,),
             mask_size: int = 256,
             blur_background: bool = False,
             fill_background_with_black: bool = False,
@@ -400,9 +404,9 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
         self.object_name = object_name
         self.train_part_names = train_part_names
         self.test_part_names = test_part_names
-        self.train_num_crops = train_num_crops
         self.batch_size = batch_size
         self.train_data_ids = train_data_ids
+        self.val_data_ids = val_data_ids
         self.mask_size = mask_size
         self.blur_background = blur_background
         self.fill_background_with_black = fill_background_with_black
@@ -431,6 +435,21 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
                 single_object=self.single_object,
                 adjust_bounding_box=self.adjust_bounding_box,
             )
+            self.val_dataset = PascalVOCPartDataset(
+                data_file_ids_file=self.train_data_file_ids_file,
+                object_name_to_return=self.object_name,
+                part_names_to_return=self.train_part_names,
+                object_size_thresh=object_size_thresh[self.object_name],
+                train=False,
+                train_data_ids=self.val_data_ids,
+                remove_overlapping_objects=self.remove_overlapping_objects,
+                object_overlapping_threshold=self.object_overlapping_threshold,
+                blur_background=self.blur_background,
+                fill_background_with_black=self.fill_background_with_black,
+                single_object=self.single_object,
+                adjust_bounding_box=self.adjust_bounding_box,
+                zero_pad_test_output=self.zero_pad_test_output,
+            )
         elif stage == "test":
             self.test_dataset = PascalVOCPartDataset(
                 data_file_ids_file=self.val_data_file_ids_file,
@@ -442,7 +461,6 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
                 object_overlapping_threshold=self.object_overlapping_threshold,
                 blur_background=self.blur_background,
                 fill_background_with_black=self.fill_background_with_black,
-                final_min_crop_size=self.final_min_crop_size,
                 single_object=self.single_object,
                 adjust_bounding_box=self.adjust_bounding_box,
                 zero_pad_test_output=self.zero_pad_test_output,
@@ -450,6 +468,10 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=1, shuffle=True)
+
+
+    def val_dataloader(self):
+        return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=1, shuffle=False)
 
     def test_dataloader(self):
         return DataLoader(self.test_dataset, batch_size=self.batch_size, num_workers=1, shuffle=False)

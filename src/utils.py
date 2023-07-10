@@ -16,10 +16,12 @@ def adjust_bbox_coords(long_side_length, short_side_length, short_side_coord_min
     return short_side_coord_min, short_side_coord_max
 
 
-def get_square_cropping_coords(mask, square_size=None):
+def get_square_cropping_coords(mask, square_size=None, margin=None):
     ys, xs = torch.where(mask == 1)
     x_start, x_end, y_start, y_end = xs.min().item(), xs.max().item() + 1, ys.min().item(), ys.max().item() + 1
     w, h = x_end - x_start, y_end - y_start
+    if margin is not None:
+        square_size = min(max(w, h) + margin, 512)
     if square_size is not None:
         if w < h:
             # diff = max(square_size, h) - h

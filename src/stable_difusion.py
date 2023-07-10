@@ -238,7 +238,7 @@ class StableDiffusion(nn.Module):
                 noise = torch.randn_like(latents).to(self.device)
                 self.noise = noise
             else:
-                noise = self.noise
+                noise = self.noise.to(self.device)
             latents_noisy = self.scheduler.add_noise(latents, noise, t)
             # pred noise
             latent_model_input = torch.cat([latents_noisy] * 2)

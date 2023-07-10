@@ -60,7 +60,7 @@ class SampleDataset(Dataset):
             final_cropped_image = torch.nn.functional.interpolate(final_cropped_image[None, ...], size=512, mode="bilinear")[0]
             final_cropped_mask = torch.nn.functional.interpolate(final_cropped_mask[None, None, ...], size=self.mask_size, mode="nearest")[0, 0]
 
-            return final_cropped_image, final_cropped_mask, final_cropped_mask / 10
+            return final_cropped_image, final_cropped_mask
         else:
             return image, 0
 

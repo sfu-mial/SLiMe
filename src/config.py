@@ -8,7 +8,7 @@ class Config:
         self.base_dir = ""
         self.batch_size = 1
         self.lr_1 = 0.1
-        self.lr_2 = 0.1
+        # self.lr_2 = 0.1
         self.lr_t = 0.001
         self.mask_size = 128
         self.attention_layers_to_use = [
@@ -47,51 +47,76 @@ class Config:
         ]
         # self.lr_conv = 0.0005
         self.optimizer = "Adam"
-        self.epochs = 100
+        self.epochs = 40
         self.gpu_id = [0]
         self.second_gpu_id = 1
-        self.train = False
-        self.dataset = "celeba-hq"  # ["sample", "pascal", "celeba-hq"]
+        self.train = True
+        self.dataset = "pascal"  # ["sample", "pascal", "celeba-hq", "paper_test"]
+        self.num_translator_hidden_layers = 1
+        self.translator_hidden_layer_dim = 1024
+        self.use_dropout_in_hidden_layer = False
 
     # Only for sample dataset
         # self.src_image_paths = sorted(glob("/home/aliasgahr/Downloads/co_part_segmentation_data/horse/*.jpg"))[-10:]
-        self.src_image_paths = ["/home/aliasgahr/Downloads/co_part_segmentation_data/car/train_data/car_17.jpg"]
+        self.src_image_paths = [f"/home/aliasgahr/Downloads/co_part_segmentation_data/horse/horse_{i}.jpg" for i in range(1,11)]
         # self.src_mask_paths = sorted(glob("/home/aliasgahr/Downloads/co_part_segmentation_data/horse/horse_tail_*.png"))[-10:]
         self.src_mask_paths = ["/home/aliasgahr/Downloads/co_part_segmentation_data/car/train_data/car_whole_17.png"]
         self.target_image_path = [f"/home/aliasgahr/Downloads/co_part_segmentation_data/car/train_data/car_{i}.jpg" for i in range(1,27)]
 
     # For training
-        self.train_checkpoint_dir = "/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/human_whole_t_hl"
+        self.train_checkpoint_dir = "/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/stable_diffusion_2/horse_neck_tail"
+        # self.train_part_names = ["background", "mouth", "nose", "brow", "ear"]
+        self.train_part_names = ["background", "tail"]
+        # self.train_part_names = ["background", "eye", "mouth", "nose", "brow", "ear", "skin", "neck", "cloth", "hair"]
+        # self.train_part_names = ["background", "body", "light", "plate", "wheel", "window"]
+        # self.train_part_names = ["background", "head", "leg", "neck+torso", "tail"]
+        # self.train_part_names = ['background', 'head', 'nose', 'torso', 'tail', 'neck', 'leg', 'paw', 'ear', 'eye', 'muzzl']
+        # self.train_part_names = ['background', 'head', 'nose', 'ear', 'eye']
+        self.self_attention_loss_coef = 1
 
     # For testing
-    #     self.test_checkpoint_dirs = ["/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/dog_nose"]
+    #     self.test_checkpoint_dir = ["/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/dog_nose"]
     #     self.test_part_names = ["background", "nose"]
-    #     self.test_checkpoint_dirs = ["/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/car_whole_t_hl_one",
+    #     self.test_checkpoint_dir = ["/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/car_whole_t_hl_bg",
                                 # "/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/car_light1",
                                 # "/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/car_plate1",
                                 # "/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/car_wheel1",
                                 # "/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/car_window1",
                                 # ]
         # self.test_part_names = ["background", "body", "light", "plate", "wheel", "window"]
-        # self.test_checkpoint_dirs = ["/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/horse_whole_t_hl_one",
+        # self.test_checkpoint_dir = ["/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/horse_whole_t_hl_one",
         #                         "/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/horse_leg",
         #                         "/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/horse_neck_torso",
         #                         "/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/horse_tail",
         #                         ]
+        self.test_checkpoint_dir = "/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/stable_diffusion_2/horse_neck_tail"
+        # self.test_part_names = ["background", "eye", "mouth", "nose", "brow", "ear", "skin", "neck", "cloth", "hair"]
+        # self.test_part_names = ["background", "body", "light", "plate", "wheel", "window"]
         # self.test_part_names = ["background", "head", "leg", "neck+torso", "tail"]
-        self.test_checkpoint_dirs = ["/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/human_whole_t_hl"]
-        self.test_part_names = ["background", "eye", "mouth", "nose", "brow", "ear", "skin", "neck", "cloth", "hair"]
+        # self.test_part_names = ["background", "mouth", "nose", "brow", "ear"]
+        self.test_part_names = ["background", "tail"]
+        # self.test_part_names = ['background', 'head', 'nose', 'torso', 'tail', 'neck', 'leg', 'paw', 'ear', 'eye', 'muzzl']
+        # self.test_part_names = ['background', 'head', 'nose', 'ear', 'eye']
         self.num_crops_per_side = 2
-        self.crop_size = 350
+        self.crop_size = 300
         self.crop_threshold = 0.2
+        self.zero_pad_test_output = False
+        self.masking = 'zoomed_masking'
 
     # Only for pascal dataset
-        self.object_name = "car"
-        self.train_num_crops = 3
-        self.train_part_names = ["background", "body", "light", "plate", "wheel", "window"]
+        self.object_name = "horse"
+        self.train_data_file_ids_file = "/home/aliasgahr/Downloads/part_segmentation/VOCtrainval_03-May-2010/VOCdevkit/VOC2010/ImageSets/Main/horse_train.txt"
+        self.val_data_file_ids_file = "/home/aliasgahr/Downloads/part_segmentation/VOCtrainval_03-May-2010/VOCdevkit/VOC2010/ImageSets/Main/horse_val.txt"
+        self.blur_background = False
+        self.fill_background_with_black = False
+        self.remove_overlapping_objects = True
+        self.object_overlapping_threshold = 0.05
+        self.final_min_crop_size = 400
+        self.single_object = True
+        self.adjust_bounding_box = False
+
+
         # self.train_part_names = ["background", "head", "leg", "neck+torso", "tail"]
-        self.train_data_file_ids_file = "/home/aliasgahr/Downloads/part_segmentation/VOCtrainval_03-May-2010/VOCdevkit/VOC2010/ImageSets/Main/car_train.txt"
-        self.val_data_file_ids_file = "/home/aliasgahr/Downloads/part_segmentation/VOCtrainval_03-May-2010/VOCdevkit/VOC2010/ImageSets/Main/car_val.txt"
         # first set of runs use mean+2std
         # self.train_data_ids = [3, 4, 10, 15, 18, 23, 24, 30, 31, 32]  # wheels (38.41 | 473) ---- (26.37, 48.95, 57.05 | 529) +
         # self.train_data_ids = [3, 5, 9, 16, 17, 21, 23, 51, 52, 54]  # lights (52.6 | 486) ---- (12.45, 30.50, 39.25 | 528) +
@@ -104,39 +129,56 @@ class Config:
         # self.train_data_ids = [3, 7, 10, 11, 12, 201, 202, 209, 210, 212]  # plate2 ( 8.93, 26.99, 36.59 | 537) +
         # self.train_data_ids = [5, 9, 205, 210, 222, 224, 227, 228, 233, 302]  # body ( | 536)
 
-        # self.train_data_ids = [1, 7, 8, 10, 12, 15, 19, 21, 24, 27]  # body
-        # self.train_data_ids = [0, 1, 2, 3, 4, 5, 6, 7, 9, 10]  # light
-        # self.train_data_ids = [0, 2, 3, 4, 5, 6, 9, 10, 11, 13]  # plate
-        # self.train_data_ids = [0, 1, 3, 4, 5, 6, 7, 8, 9, 10]  # wheel
-        # self.train_data_ids = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]  # window
+        # self.train_data_ids = [1, 7, 8, 10, 18, 21, 24, 29, 30, 34]  # car body
+        # self.val_data_ids = [43, 45, 46, 47, 48, 49, 51, 54, 55, 56]  # car body
+        # self.train_data_ids = [0, 1, 2, 3, 4, 5, 6, 7, 9, 10]  # car light
+        # self.val_data_ids = [11, 14, 16, 17, 18, 19, 20, 21, 24, 25]  # car light
+        # self.train_data_ids = [0, 2, 3, 4, 5, 6, 9, 10, 11, 13]  # car plate
+        # self.val_data_ids = [16, 17, 18, 19, 20, 22, 25, 26, 27, 30]  # car plate
+        # self.train_data_ids = [0, 1, 3, 4, 5, 6, 7, 8, 9, 10]  # car wheel
+        # self.val_data_ids = [12, 13, 14, 17, 19, 20, 21, 22, 29, 31]  # car wheel
+        # self.train_data_ids = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]  # car window
+        # self.val_data_ids = [10, 11, 13, 15, 16, 17, 19, 28, 29, 32]  # car window
+
         # self.train_data_ids = [0, 2, 3, 4, 5, 6, 7, 8, 10, 11]  # nose
         # self.train_data_ids = [71]  # whole car one
         # self.train_data_ids = [7, 8, 12, 19, 30, 35, 52, 56, 58, 69]  # whole car
         # self.train_data_ids = [2]  # whole horse one
-        # self.train_data_ids = [2, 3, 4, 5, 6, 10, 12, 14, 16, 20]  # whole horse
-        self.blur_background = False
-        self.fill_background_with_black = True
-        self.remove_overlapping_objects = False
-        self.object_overlapping_threshold = 0.05
+        # self.train_data_ids = [2, 3, 4, 5, 6, 12, 18, 20, 25, 27]  # whole horse
+        # self.val_data_ids = [48, 55, 71, 73, 74, 89, 94, 99, 100, 103]  # whole car
+        # self.val_data_ids = [28, 29, 30, 31, 33, 35, 39, 40, 41, 43]  # whole horse
+        # self.train_data_ids = [6]  # dog head one
+        # self.train_data_ids = [1, 3, 4, 5, 6, 7, 8, 9, 10, 22]  # dog head
+        # self.val_data_ids = [i for i in range(11, 21)]  # dog head
+
+        # self.train_data_ids = [0, 1, 2, 3, 4, 5, 6, 8, 10, 11]  # horse head
+        # self.val_data_ids = [28, 29, 30, 31, 33, 35, 39, 40, 41, 43]  # horse head
+        # self.train_data_ids = [0, 1, 2, 3, 4, 5, 6, 7, 8, 10]  # horse leg
+        # self.val_data_ids = [11, 12, 13, 15, 17, 18, 19, 20, 21, 23]  # horse leg
+        # self.train_data_ids = [1, 2, 3, 4, 5, 6, 8, 11, 13, 16]  # horse neck_torso
+        # self.val_data_ids = [18, 19, 20, 22, 23, 24, 26, 27, 29, 30]  # horse neck_torso
+        self.train_data_ids = [1, 3, 4, 5, 13, 14, 16, 17, 18, 22]  # horse tail
+        self.val_data_ids = [23, 24, 26, 27, 31, 33, 34, 35, 36, 41]  # horse tail
+
 
     # only for celeba dataset
         self.images_dir = '/home/aliasgahr/Downloads/CelebAMask-HQ/CelebA-HQ-img'
         self.masks_dir = '/home/aliasgahr/Downloads/CelebAMask-HQ/CelebAMask-HQ-mask-anno'
         self.idx_mapping_file = '/home/aliasgahr/Downloads/CelebAMask-HQ/CelebA-HQ-to-CelebA-mapping.txt'
-        self.test_file_names_file_path = '/home/aliasgahr/Downloads/CelebAMask-HQ/test_file_names.txt'
-        self.non_test_file_names_file_path = '/home/aliasgahr/Downloads/CelebAMask-HQ/non_test_file_names.txt'
-        self.train_parts_to_return = ["background", "eye", "mouth", "nose", "brow", "ear", "skin", "neck", "cloth", "hair"]
-        self.test_parts_to_return = ["background", "eye", "mouth", "nose", "brow", "ear", "skin", "neck", "cloth", "hair"]
-        self.train_data_ids = [i for i in range(10)]
-        # self.train_data_ids = [5, 7, 8, 9, 12, 32, 36, 48, 57, 67]  # ear
-        # self.train_data_ids = [1, 5, 7, 8, 9, 12, 13, 22, 31, 34]  # hair
+        self.test_file_names_file_path = '/home/aliasgahr/Downloads/CelebAMask-HQ/paper_test_file_names.txt'
+        self.train_file_names_file_path = '/home/aliasgahr/Downloads/CelebAMask-HQ/non_test_file_names.txt'
+        self.val_file_names_file_path = '/home/aliasgahr/Downloads/CelebAMask-HQ/non_test_file_names.txt'
+        # self.train_data_ids = [i for i in range(10)]
+        # self.val_data_ids = [i for i in range(200, 210)]
         # self.train_data_ids = [0, 1, 8, 9, 12, 36, 50, 57, 67, 70]  # eye
-        # self.train_data_ids = [0, 1, 8, 9, 12, 36, 57, 75, 82, 83]  # brow
-        # self.train_data_ids = [0, 1, 5, 10, 8, 9, 12, 36, 75, 83]  # nose
         # self.train_data_ids = [0, 1, 5, 9, 12, 36, 60, 75, 83, 84]  # mouth
+        # self.train_data_ids = [0, 1, 5, 10, 8, 9, 12, 36, 75, 83]  # nose
+        # self.train_data_ids = [0, 1, 8, 9, 12, 36, 57, 75, 82, 83]  # brow
+        # self.train_data_ids = [5, 7, 8, 9, 12, 32, 36, 48, 57, 67]  # ear
         # self.train_data_ids = [0, 1, 7, 8, 9, 12, 36, 59, 75, 85]  # skin
-        # self.train_data_ids = [7, 8, 9, 12, 14, 29, 36, 57, 86, 87]  # cloth
         # self.train_data_ids = [0, 1, 7, 8, 9, 36, 75, 81, 85, 87]  # neck
+        # self.train_data_ids = [7, 8, 9, 12, 14, 29, 36, 57, 86, 87]  # cloth
+        # self.train_data_ids = [1, 5, 7, 8, 9, 12, 13, 22, 31, 34]  # hair
 
         # train on my segmented data
         # 538 horse head         -> (31.50, 50.31, 52.95 | 542) +
@@ -162,3 +204,6 @@ class Config:
         # 595 car window         -> (55.45 | 607) -
         # 596 car body           -> (57.62 | 607) -
 
+    # Paper Test Dataset
+        self.test_images_dir = "/home/aliasgahr/Downloads/Car_TestSet/image_bg"
+        self.test_masks_dir = "/home/aliasgahr/Downloads/Car_TestSet/gt_mask"

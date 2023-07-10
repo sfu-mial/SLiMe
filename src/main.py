@@ -18,7 +18,6 @@ def main():
             src_image_dirs=config.src_image_paths,
             target_image_dir=config.target_image_path,
             src_mask_dirs=config.src_mask_paths,
-            train_num_crops=config.train_num_crops,
             batch_size=config.batch_size,
             mask_size=config.mask_size,
         )
@@ -29,9 +28,9 @@ def main():
             object_name=config.object_name,
             train_part_names=config.train_part_names,
             test_part_names=config.test_part_names,
-            train_num_crops=config.train_num_crops,
             batch_size=config.batch_size,
             train_data_ids=config.train_data_ids,
+            val_data_ids=config.val_data_ids,
             mask_size=config.mask_size,
             blur_background=config.blur_background,
             fill_background_with_black=config.fill_background_with_black,
@@ -48,12 +47,14 @@ def main():
             masks_dir=config.masks_dir,
             idx_mapping_file=config.idx_mapping_file,
             test_file_names_file_path=config.test_file_names_file_path,
-            non_test_file_names_file_path=config.non_test_file_names_file_path,
+            train_file_names_file_path=config.train_file_names_file_path,
+            val_file_names_file_path=config.val_file_names_file_path,
             train_part_names=config.train_part_names,
             test_part_names=config.test_part_names,
             batch_size=config.batch_size,
             mask_size=config.mask_size,
             train_data_ids=config.train_data_ids,
+            val_data_ids=config.val_data_ids,
         )
     elif config.dataset == "paper_test":
         dm = PaperTestSampleDataModule(
@@ -75,7 +76,7 @@ def main():
     )
     if config.train:
         trainer.fit(model=model, datamodule=dm)
-        # trainer.test(model=model, datamodule=dm)
+        trainer.test(model=model, datamodule=dm)
     else:
         trainer.test(model=model, datamodule=dm)
 
