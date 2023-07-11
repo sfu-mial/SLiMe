@@ -60,7 +60,8 @@ def main():
         dm = PaperTestSampleDataModule(
             test_images_dir=config.test_images_dir,
             test_masks_dir=config.test_masks_dir,
-            mask_size=config.mask_size
+            mask_size=config.mask_size,
+            zero_pad_test_output=config.zero_pad_test_output,
         )
     model = CoSegmenterTrainer(config=config)
     trainer = pl.Trainer(
@@ -73,6 +74,7 @@ def main():
         log_every_n_steps=1,
         # accumulate_grad_batches=config.train_num_crops // config.batch_size,
         enable_checkpointing=False,
+        num_sanity_val_steps=0
     )
     if config.train:
         trainer.fit(model=model, datamodule=dm)

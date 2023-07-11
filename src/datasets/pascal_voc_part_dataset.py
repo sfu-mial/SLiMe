@@ -277,18 +277,18 @@ class PascalVOCPartDataset(Dataset):
                 selected_data.append(self.data[id])
             self.data = selected_data
 
-        self.train_transform = A.Compose([
-                A.Resize(512, 512),
-                # A.LongestMaxSize(512),
-                # A.PadIfNeeded(512, 512, border_mode=cv2.BORDER_CONSTANT, value=0,
-                #               mask_value=0),
+        if zero_pad_test_output:
+            self.train_transform = A.Compose([
+                # A.Resize(512, 512),
+                A.LongestMaxSize(512),
+                A.PadIfNeeded(512, 512, border_mode=cv2.BORDER_CONSTANT, value=0,
+                              mask_value=0),
                 A.HorizontalFlip(),
-                A.RandomScale((0.5, 2), always_apply=True),
-                A.RandomResizedCrop(512, 512, (0.5, 1)),
+                # A.RandomScale((0.5, 2), always_apply=True),
+                A.RandomResizedCrop(512, 512, (0.8, 1)),
                 A.Rotate((-10, 10), border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0),
                 ToTensorV2()
             ])
-        if zero_pad_test_output:
             self.test_transform = A.Compose([
                 A.LongestMaxSize(512),
                 A.PadIfNeeded(512, 512, border_mode=cv2.BORDER_CONSTANT, value=0,
@@ -296,6 +296,17 @@ class PascalVOCPartDataset(Dataset):
                 ToTensorV2()
             ])
         else:
+            self.train_transform = A.Compose([
+                A.Resize(512, 512),
+                # A.LongestMaxSize(512),
+                # A.PadIfNeeded(512, 512, border_mode=cv2.BORDER_CONSTANT, value=0,
+                #               mask_value=0),
+                A.HorizontalFlip(),
+                # A.RandomScale((0.5, 2), always_apply=True),
+                A.RandomResizedCrop(512, 512, (0.2, 1)),
+                A.Rotate((-10, 10), border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0),
+                ToTensorV2()
+            ])
             self.test_transform = A.Compose([
                 # A.SmallestMaxSize(512),
                 A.Resize(512, 512),
@@ -315,20 +326,23 @@ class PascalVOCPartDataset(Dataset):
         if self.single_object:
             body_mask = 0
             non_body_mask = 0
+            whole_mask = 0
             for idx, part_name in enumerate(self.part_names_to_return):
                 part_ids = part_data.get(part_name, None)
                 if part_ids is not None:
                     if part_name == "body":
                         for object_id, part_id in part_ids:
                             body_mask = np.where(anns[0, object_id][3][0][part_id][1] > 0, idx, body_mask)
+                            whole_mask += anns[0, object_id][2]  # object mask
                         if part_data.get("non_body", False):
                             for object_id, part_id in part_data["non_body"]:
                                 body_mask = np.where(anns[0, object_id][3][0][part_id][1] > 0, 0, body_mask)
                     else:
                         for object_id, part_id in part_ids:
                             non_body_mask = np.where(anns[0, object_id][3][0][part_id][1] > 0, idx, non_body_mask)
+                            whole_mask += anns[0, object_id][2]  # object mask
             mask = non_body_mask + body_mask
-            whole_mask = anns[0, object_id][2]  # object mask
+            whole_mask = np.where(whole_mask > 0, 1, 0)
         else:
             whole_mask = 0
             body_mask = 0
@@ -360,12 +374,16 @@ class PascalVOCPartDataset(Dataset):
         mask = mask[bbox[1]:bbox[3], bbox[0]:bbox[2]]
 
         if self.train:
-
-            result = self.train_transform(image=np.array(image), mask=mask)
+            mask_is_included = False
+            while not mask_is_included:
+                result = self.train_transform(image=np.array(image), mask=mask)
+                # mask = torch.as_tensor(result["mask"])
+                if np.where(result["mask"] > 0, 1, 0).sum() > 20:
+                    mask_is_included = True
             image = result["image"]
             mask = torch.as_tensor(result["mask"])
             mask = \
-            torch.nn.functional.interpolate(mask[None, None, ...].type(torch.float), self.mask_size, mode="nearest")[0, 0]
+                torch.nn.functional.interpolate(mask[None, None, ...].type(torch.float), self.mask_size, mode="nearest")[0, 0]
             return image/255, mask
         else:
             result = self.test_transform(image=np.array(image), mask=mask)

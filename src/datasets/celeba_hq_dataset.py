@@ -81,17 +81,17 @@ class CelebaHQDataset(Dataset):
             self.images_paths = aux_images_paths
             self.masks_paths = aux_masks_paths
 
-        self.train_transform = A.Compose([
-            A.LongestMaxSize(512),
-            A.PadIfNeeded(512, 512, border_mode=cv2.BORDER_CONSTANT, value=0,
-                          mask_value=0),
-            A.HorizontalFlip(),
-            # A.RandomScale((0.5, 2), always_apply=True),
-            A.RandomResizedCrop(512, 512, (0.2, 1)),
-            A.Rotate((-10, 10), border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0),
-            ToTensorV2()
-        ])
         if zero_pad_test_output:
+            self.train_transform = A.Compose([
+                A.LongestMaxSize(512),
+                A.PadIfNeeded(512, 512, border_mode=cv2.BORDER_CONSTANT, value=0,
+                              mask_value=0),
+                A.HorizontalFlip(),
+                # A.RandomScale((0.5, 2), always_apply=True),
+                A.RandomResizedCrop(512, 512, (0.2, 1)),
+                A.Rotate((-10, 10), border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0),
+                ToTensorV2()
+            ])
             self.test_transform = A.Compose([
                 A.LongestMaxSize(512),
                 A.PadIfNeeded(512, 512, border_mode=cv2.BORDER_CONSTANT, value=0,
@@ -99,8 +99,16 @@ class CelebaHQDataset(Dataset):
                 ToTensorV2()
             ])
         else:
+            self.train_transform = A.Compose([
+                A.Resize(512, 512),
+                A.HorizontalFlip(),
+                # A.RandomScale((0.5, 2), always_apply=True),
+                A.RandomResizedCrop(512, 512, (0.2, 1)),
+                A.Rotate((-10, 10), border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0),
+                ToTensorV2()
+            ])
             self.test_transform = A.Compose([
-                A.SmallestMaxSize(512),
+                A.Resize(512, 512),
                 ToTensorV2()
             ])
 
@@ -131,9 +139,18 @@ class CelebaHQDataset(Dataset):
 
         if self.train:
             image = transforms.functional.resize(image, 512)  # because the original image size is 1024 but the mask is 512
-            result = self.train_transform(image=np.array(image), mask=final_mask)
+            mask_is_included = False
+            while not mask_is_included:
+                result = self.train_transform(image=np.array(image), mask=final_mask)
+                # mask = torch.as_tensor(result["mask"])
+                if np.where(result["mask"] > 0, 1, 0).sum() > 20:
+                    mask_is_included = True
+
             image = result["image"]
             mask = torch.as_tensor(result["mask"])
+            # result = self.train_transform(image=np.array(image), mask=final_mask)
+            # image = result["image"]
+            # mask = torch.as_tensor(result["mask"])
             mask = \
                 torch.nn.functional.interpolate(mask[None, None, ...].type(torch.float), self.mask_size,
                                                 mode="nearest")[0, 0]

@@ -51,10 +51,12 @@ class Config:
         self.gpu_id = [0]
         self.second_gpu_id = 1
         self.train = True
-        self.dataset = "pascal"  # ["sample", "pascal", "celeba-hq", "paper_test"]
+        self.dataset = "celeba-hq"  # ["sample", "pascal", "celeba-hq", "paper_test"]
         self.num_translator_hidden_layers = 1
         self.translator_hidden_layer_dim = 1024
         self.use_dropout_in_hidden_layer = False
+        # self.noise_path = "/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/stable_diffusion_2/noise1.pth"
+        self.noise_path = None
 
     # Only for sample dataset
         # self.src_image_paths = sorted(glob("/home/aliasgahr/Downloads/co_part_segmentation_data/horse/*.jpg"))[-10:]
@@ -64,9 +66,9 @@ class Config:
         self.target_image_path = [f"/home/aliasgahr/Downloads/co_part_segmentation_data/car/train_data/car_{i}.jpg" for i in range(1,27)]
 
     # For training
-        self.train_checkpoint_dir = "/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/stable_diffusion_2/horse_neck_tail"
+        self.train_checkpoint_dir = "/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/stable_diffusion_2/human_brow_2"
         # self.train_part_names = ["background", "mouth", "nose", "brow", "ear"]
-        self.train_part_names = ["background", "tail"]
+        self.train_part_names = ["background", "brow"]
         # self.train_part_names = ["background", "eye", "mouth", "nose", "brow", "ear", "skin", "neck", "cloth", "hair"]
         # self.train_part_names = ["background", "body", "light", "plate", "wheel", "window"]
         # self.train_part_names = ["background", "head", "leg", "neck+torso", "tail"]
@@ -89,12 +91,12 @@ class Config:
         #                         "/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/horse_neck_torso",
         #                         "/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/horse_tail",
         #                         ]
-        self.test_checkpoint_dir = "/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/stable_diffusion_2/horse_neck_tail"
+        self.test_checkpoint_dir = "/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/stable_diffusion_2/human_brow_2"
         # self.test_part_names = ["background", "eye", "mouth", "nose", "brow", "ear", "skin", "neck", "cloth", "hair"]
         # self.test_part_names = ["background", "body", "light", "plate", "wheel", "window"]
         # self.test_part_names = ["background", "head", "leg", "neck+torso", "tail"]
         # self.test_part_names = ["background", "mouth", "nose", "brow", "ear"]
-        self.test_part_names = ["background", "tail"]
+        self.test_part_names = ["background", "brow"]
         # self.test_part_names = ['background', 'head', 'nose', 'torso', 'tail', 'neck', 'leg', 'paw', 'ear', 'eye', 'muzzl']
         # self.test_part_names = ['background', 'head', 'nose', 'ear', 'eye']
         self.num_crops_per_side = 2
@@ -133,7 +135,7 @@ class Config:
         # self.val_data_ids = [43, 45, 46, 47, 48, 49, 51, 54, 55, 56]  # car body
         # self.train_data_ids = [0, 1, 2, 3, 4, 5, 6, 7, 9, 10]  # car light
         # self.val_data_ids = [11, 14, 16, 17, 18, 19, 20, 21, 24, 25]  # car light
-        # self.train_data_ids = [0, 2, 3, 4, 5, 6, 9, 10, 11, 13]  # car plate
+        # self.train_data_ids = [3, 5, 9, 11, 17, 40, 41, 51, 52, 54]  # car plate
         # self.val_data_ids = [16, 17, 18, 19, 20, 22, 25, 26, 27, 30]  # car plate
         # self.train_data_ids = [0, 1, 3, 4, 5, 6, 7, 8, 9, 10]  # car wheel
         # self.val_data_ids = [12, 13, 14, 17, 19, 20, 21, 22, 29, 31]  # car wheel
@@ -157,8 +159,8 @@ class Config:
         # self.val_data_ids = [11, 12, 13, 15, 17, 18, 19, 20, 21, 23]  # horse leg
         # self.train_data_ids = [1, 2, 3, 4, 5, 6, 8, 11, 13, 16]  # horse neck_torso
         # self.val_data_ids = [18, 19, 20, 22, 23, 24, 26, 27, 29, 30]  # horse neck_torso
-        self.train_data_ids = [1, 3, 4, 5, 13, 14, 16, 17, 18, 22]  # horse tail
-        self.val_data_ids = [23, 24, 26, 27, 31, 33, 34, 35, 36, 41]  # horse tail
+        # self.train_data_ids = [1, 3, 4, 5, 13, 14, 16, 17, 18, 22]  # horse tail
+        # self.val_data_ids = [23, 24, 26, 27, 31, 33, 34, 35, 36, 41]  # horse tail
 
 
     # only for celeba dataset
@@ -169,11 +171,11 @@ class Config:
         self.train_file_names_file_path = '/home/aliasgahr/Downloads/CelebAMask-HQ/non_test_file_names.txt'
         self.val_file_names_file_path = '/home/aliasgahr/Downloads/CelebAMask-HQ/non_test_file_names.txt'
         # self.train_data_ids = [i for i in range(10)]
-        # self.val_data_ids = [i for i in range(200, 210)]
+        self.val_data_ids = [i for i in range(200, 210)]
         # self.train_data_ids = [0, 1, 8, 9, 12, 36, 50, 57, 67, 70]  # eye
         # self.train_data_ids = [0, 1, 5, 9, 12, 36, 60, 75, 83, 84]  # mouth
         # self.train_data_ids = [0, 1, 5, 10, 8, 9, 12, 36, 75, 83]  # nose
-        # self.train_data_ids = [0, 1, 8, 9, 12, 36, 57, 75, 82, 83]  # brow
+        self.train_data_ids = [0, 1, 8, 9, 12, 36, 57, 75, 82, 83]  # brow
         # self.train_data_ids = [5, 7, 8, 9, 12, 32, 36, 48, 57, 67]  # ear
         # self.train_data_ids = [0, 1, 7, 8, 9, 12, 36, 59, 75, 85]  # skin
         # self.train_data_ids = [0, 1, 7, 8, 9, 36, 75, 81, 85, 87]  # neck

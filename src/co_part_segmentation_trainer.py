@@ -20,14 +20,19 @@ class CoSegmenterTrainer(pl.LightningModule):
         self.automatic_optimization = True
         self.stable_diffusion = StableDiffusion(sd_version='2.1', partial_run=False,
                                                 attention_layers_to_use=config.attention_layers_to_use)
-        noise = torch.load("/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/stable_diffusion_2/noise.pth")
-        self.stable_diffusion.noise = noise
+        # if self.config.noise_path is not None:
+        #     noise = torch.load(self.config.noise_path)
+        #     self.stable_diffusion.noise = noise
+        #     self.generate_noise = False
+        # else:
+        #     self.generate_noise = True
+        self.generate_noise = True
         self.target_image_original = None
 
         self.val_epoch_iou = 0
         self.max_val_iou = 0
 
-        self.generate_noise = True
+
         os.makedirs(self.config.train_checkpoint_dir, exist_ok=True)
 
         self.uncond_embedding, self.text_embedding = self.stable_diffusion.get_text_embeds("", "")
@@ -39,18 +44,21 @@ class CoSegmenterTrainer(pl.LightningModule):
 
     def on_fit_start(self) -> None:
         self.stable_diffusion.setup(self.device, torch.device(f"cuda:{self.config.second_gpu_id}"))
+        self.uncond_embedding, self.text_embedding = self.stable_diffusion.get_text_embeds("", "")
+
+    # def on_train_epoch_start(self) -> None:
+    #     self.generate_noise = True
 
     def training_step(self, batch, batch_idx):
         src_images, mask1 = batch
         mask1 = mask1[0]
         t = torch.randint(low=10, high=160, size=(1,)).item()
-        uncond_embeddings, text_embeddings = self.stable_diffusion.get_text_embeds("", "")
+        _, text_embeddings = self.stable_diffusion.get_text_embeds("", "")
         self.text_embedding = torch.cat([text_embeddings[:, :1], self.token_t.to(self.stable_diffusion.device), text_embeddings[:, 2:]], dim=1)
-        self.uncond_embedding = uncond_embeddings
         loss, _, sd_cross_attention_maps2, sd_self_attention_maps = self.stable_diffusion.train_step(
             torch.repeat_interleave(torch.cat([self.uncond_embedding, self.text_embedding]), self.config.batch_size, 0),
             src_images, t=torch.tensor(t),
-            back_propagate_loss=False, generate_new_noise=False,
+            back_propagate_loss=False, generate_new_noise=self.generate_noise,
             attention_output_size=self.config.mask_size, token_ids=list(range(77)), train=True, average_layers=True, apply_softmax=False)
         self.generate_noise = False
         loss1 = torch.nn.functional.cross_entropy(sd_cross_attention_maps2[None, ...], mask1[None, ...].type(torch.long))
@@ -102,7 +110,7 @@ class CoSegmenterTrainer(pl.LightningModule):
                 with torch.no_grad():
                     loss, _, sd_cross_attention_maps2, sd_self_attention_maps = self.stable_diffusion.train_step(
                         torch.cat([self.uncond_embedding, self.translator(self.text_embedding)], dim=0), cropped_image,
-                        t=torch.tensor(20), back_propagate_loss=False, generate_new_noise=False,
+                        t=torch.tensor(20), back_propagate_loss=False, generate_new_noise=self.generate_noise,
                         attention_output_size=64,
                         token_ids=list(range(len(self.config.test_part_names))), train=False)
                 self.stable_diffusion.attention_maps = {}
@@ -152,9 +160,9 @@ class CoSegmenterTrainer(pl.LightningModule):
 
     def zoom_and_mask(self, image, threshold, batch_idx):
         final_attention_map = torch.zeros(len(self.config.test_part_names), image.shape[2], image.shape[3])
-        uncond_embeddings, text_embeddings = self.stable_diffusion.get_text_embeds("", "")
-        self.text_embedding = torch.cat([text_embeddings[:, :1], self.token_t.to(self.stable_diffusion.device), text_embeddings[:, 2:]], dim=1)
-        self.uncond_embedding = uncond_embeddings
+        # uncond_embeddings, text_embeddings = self.stable_diffusion.get_text_embeds("", "")
+        # self.text_embedding = torch.cat([text_embeddings[:, :1], self.token_t.to(self.stable_diffusion.device), text_embeddings[:, 2:]], dim=1)
+        # self.uncond_embedding = uncond_embeddings
         with torch.no_grad():
             loss, _, sd_cross_attention_maps2, sd_self_attention_maps = self.stable_diffusion.train_step(
                 torch.cat([self.uncond_embedding, self.text_embedding], dim=0), image,
@@ -193,16 +201,16 @@ class CoSegmenterTrainer(pl.LightningModule):
         if torch.sum(torch.where(final_mask > 0, 1, 0)) == 0:
             x_start, x_end, y_start, y_end, crop_size = 0, 512, 0, 512, 512
         else:
-            x_start, x_end, y_start, y_end, crop_size = get_square_cropping_coords(torch.where(final_mask > 0, 1, 0), margin=10)
+            x_start, x_end, y_start, y_end, crop_size = get_square_cropping_coords(torch.where(final_mask > 0, 1, 0), margin=40)
 
         cropped_image = image[:, :, y_start:y_end, x_start:x_end]
         image_grid = torchvision.utils.make_grid(cropped_image)
         self.logger.experiment.add_image("test cropped mask", image_grid, batch_idx)
 
         final_attention_map = torch.zeros(len(self.config.test_part_names), crop_size, crop_size)
-        uncond_embeddings, text_embeddings = self.stable_diffusion.get_text_embeds("", "")
-        self.text_embedding = torch.cat([text_embeddings[:, :1], self.token_t.to(self.stable_diffusion.device), text_embeddings[:, 2:]], dim=1)
-        self.uncond_embedding = uncond_embeddings
+        # uncond_embeddings, text_embeddings = self.stable_diffusion.get_text_embeds("", "")
+        # self.text_embedding = torch.cat([text_embeddings[:, :1], self.token_t.to(self.stable_diffusion.device), text_embeddings[:, 2:]], dim=1)
+        # self.uncond_embedding = uncond_embeddings
         with torch.no_grad():
             loss, _, sd_cross_attention_maps2, sd_self_attention_maps = self.stable_diffusion.train_step(
                 torch.cat([self.uncond_embedding, self.text_embedding], dim=0), cropped_image,
@@ -244,6 +252,12 @@ class CoSegmenterTrainer(pl.LightningModule):
 
         return final_mask
 
+    def on_validation_start(self):
+        uncond_embeddings, text_embeddings = self.stable_diffusion.get_text_embeds("", "")
+        self.text_embedding = torch.cat(
+            [text_embeddings[:, :1], self.token_t.to(self.stable_diffusion.device), text_embeddings[:, 2:]], dim=1)
+        self.uncond_embedding = uncond_embeddings
+
     def validation_step(self, batch, batch_idx):
         image, mask = batch
         mask = mask[0]
@@ -257,7 +271,6 @@ class CoSegmenterTrainer(pl.LightningModule):
             final_mask = self.zoom_and_mask(image,
                                             self.config.crop_threshold,
                                             batch_idx)
-
         final_mask = final_mask.cpu()
         predicted_mask_grid = torchvision.utils.make_grid(final_mask / final_mask.max())
         image_grid = torchvision.utils.make_grid(image)
@@ -286,12 +299,18 @@ class CoSegmenterTrainer(pl.LightningModule):
             self.max_val_iou = self.val_epoch_iou
             torch.save(self.token_t,
                        os.path.join(self.config.train_checkpoint_dir, "token_t.pth"))
+            torch.save(self.stable_diffusion.noise.cpu(),
+                       os.path.join(self.config.train_checkpoint_dir, "noise.pth"))
 
     def on_test_start(self) -> None:
         self.stable_diffusion.setup(self.device, torch.device(f"cuda:{self.config.second_gpu_id}"))
         self.stable_diffusion.change_hooks(attention_layers_to_use=self.config.attention_layers_to_use)  # exclude self attention layer
         self.uncond_embedding, self.text_embedding = self.stable_diffusion.get_text_embeds("", "")
-        self.token_t = torch.load(os.path.join(self.config.test_checkpoint_dir, "token_t.pth"))
+        token_t = torch.load(os.path.join(self.config.test_checkpoint_dir, "token_t.pth"))
+        noise = torch.load(os.path.join(self.config.test_checkpoint_dir, "noise.pth"))
+        self.text_embedding = torch.cat(
+            [self.text_embedding[:, :1], token_t.to(self.stable_diffusion.device), self.text_embedding[:, 2:]], dim=1)
+        self.stable_diffusion.noise = noise.to(self.stable_diffusion.device)
 
     def test_step(self, batch, batch_idx):
         image, mask = batch
@@ -308,7 +327,6 @@ class CoSegmenterTrainer(pl.LightningModule):
             final_mask = self.zoom_and_mask(image,
                                             self.config.crop_threshold,
                                             batch_idx)
-
         final_mask = final_mask.cpu()
 
         predicted_mask_grid = torchvision.utils.make_grid(final_mask/final_mask.max())
