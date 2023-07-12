@@ -46,18 +46,18 @@ class CoSegmenterTrainer(pl.LightningModule):
         self.stable_diffusion.setup(self.device, torch.device(f"cuda:{self.config.second_gpu_id}"))
         self.uncond_embedding, self.text_embedding = self.stable_diffusion.get_text_embeds("", "")
 
-    # def on_train_epoch_start(self) -> None:
-    #     self.generate_noise = True
+    def on_train_epoch_start(self) -> None:
+        self.generate_noise = True
 
     def training_step(self, batch, batch_idx):
         src_images, mask1 = batch
         mask1 = mask1[0]
-        t = torch.randint(low=10, high=160, size=(1,)).item()
+        # t = torch.randint(low=10, high=160, size=(1,)).item()
         _, text_embeddings = self.stable_diffusion.get_text_embeds("", "")
         self.text_embedding = torch.cat([text_embeddings[:, :1], self.token_t.to(self.stable_diffusion.device), text_embeddings[:, 2:]], dim=1)
         loss, _, sd_cross_attention_maps2, sd_self_attention_maps = self.stable_diffusion.train_step(
             torch.repeat_interleave(torch.cat([self.uncond_embedding, self.text_embedding]), self.config.batch_size, 0),
-            src_images, t=torch.tensor(t),
+            src_images, t=torch.tensor(20),
             back_propagate_loss=False, generate_new_noise=self.generate_noise,
             attention_output_size=self.config.mask_size, token_ids=list(range(77)), train=True, average_layers=True, apply_softmax=False)
         self.generate_noise = False
@@ -201,7 +201,7 @@ class CoSegmenterTrainer(pl.LightningModule):
         if torch.sum(torch.where(final_mask > 0, 1, 0)) == 0:
             x_start, x_end, y_start, y_end, crop_size = 0, 512, 0, 512, 512
         else:
-            x_start, x_end, y_start, y_end, crop_size = get_square_cropping_coords(torch.where(final_mask > 0, 1, 0), margin=40)
+            x_start, x_end, y_start, y_end, crop_size = get_square_cropping_coords(torch.where(final_mask > 0, 1, 0), margin=10)
 
         cropped_image = image[:, :, y_start:y_end, x_start:x_end]
         image_grid = torchvision.utils.make_grid(cropped_image)
