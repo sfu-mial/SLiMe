@@ -8,11 +8,12 @@ from src.datasets.pascal_voc_part_dataset import PascalVOCPartDataModule
 from src.datasets.sample_dataset import SampleDataModule
 from src.datasets.celeba_hq_dataset import CelebaHQDataModule
 from src.datasets.paper_test_sample_dataset import PaperTestSampleDataModule
-
+from src.arguments import init_args
 
 def main():
     # torch.manual_seed(42)
-    config = Config()
+    config = init_args()
+    # config = Config()
     if config.dataset == "sample":
         dm = SampleDataModule(
             src_image_dirs=config.src_image_paths,
@@ -64,12 +65,16 @@ def main():
             zero_pad_test_output=config.zero_pad_test_output,
         )
     model = CoSegmenterTrainer(config=config)
+    if isinstance(config.gpu_id, int):
+        gpu_id = [config.gpu_id]
+    else:
+        gpu_id = config.gpu_id
     trainer = pl.Trainer(
         accelerator="gpu",
         # strategy="dp",
         default_root_dir=config.base_dir,
         max_epochs=config.epochs,
-        devices=config.gpu_id,
+        devices=gpu_id,
         # precision=16,
         log_every_n_steps=1,
         # accumulate_grad_batches=config.train_num_crops // config.batch_size,
