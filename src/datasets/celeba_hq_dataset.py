@@ -174,10 +174,8 @@ class CelebaHQDataModule(pl.LightningDataModule):
             test_file_names_file_path: str = "./data",
             train_file_names_file_path: str = "./data",
             val_file_names_file_path: str = "./data",
-            train_part_names: List[str]=("background", "eye", "mouth", "nose", "brow", "ear", "skin", "neck",
+            part_names: List[str]=("background", "eye", "mouth", "nose", "brow", "ear", "skin", "neck",
                                               "cloth", "hair"),
-            test_part_names: List[str] = ("background", "eye", "mouth", "nose", "brow", "ear", "skin", "neck",
-                                                "cloth", "hair"),
             batch_size: int = 1,
             mask_size: int = 256,
             train_data_ids: List[int] = [i for i in range(10)],
@@ -191,8 +189,7 @@ class CelebaHQDataModule(pl.LightningDataModule):
         self.test_file_names_file_path = test_file_names_file_path
         self.train_file_names_file_path = train_file_names_file_path
         self.val_file_names_file_path = val_file_names_file_path
-        self.train_part_names = train_part_names
-        self.test_part_names = test_part_names
+        self.part_names = part_names
         self.batch_size = batch_size
         self.mask_size = mask_size
         self.train_data_ids = train_data_ids
@@ -206,7 +203,7 @@ class CelebaHQDataModule(pl.LightningDataModule):
                 images_dir=self.images_dir,
                 masks_dir=self.masks_dir,
                 idx_mapping_file=self.idx_mapping_file,
-                parts_to_return=self.train_part_names,
+                parts_to_return=self.part_names,
                 data_ids=self.train_data_ids,
                 file_names_file_path=self.train_file_names_file_path,
                 train=True,
@@ -216,7 +213,7 @@ class CelebaHQDataModule(pl.LightningDataModule):
                 images_dir=self.images_dir,
                 masks_dir=self.masks_dir,
                 idx_mapping_file=self.idx_mapping_file,
-                parts_to_return=self.train_part_names,
+                parts_to_return=self.part_names,
                 data_ids=self.val_data_ids,
                 file_names_file_path=self.val_file_names_file_path,
                 train=False,
@@ -226,17 +223,17 @@ class CelebaHQDataModule(pl.LightningDataModule):
                 images_dir=self.images_dir,
                 masks_dir=self.masks_dir,
                 idx_mapping_file=self.idx_mapping_file,
-                parts_to_return=self.test_part_names,
+                parts_to_return=self.part_names,
                 file_names_file_path=self.test_file_names_file_path,
                 train=False,
                 zero_pad_test_output=self.zero_pad_test_output
             )
 
     def train_dataloader(self):
-        return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=8, shuffle=True)
+        return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=3, shuffle=True)
 
     def val_dataloader(self):
-        return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=8, shuffle=False)
+        return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=3, shuffle=False)
 
     def test_dataloader(self):
-        return DataLoader(self.test_dataset, batch_size=self.batch_size, num_workers=8, shuffle=False)
+        return DataLoader(self.test_dataset, batch_size=self.batch_size, num_workers=3, shuffle=False)

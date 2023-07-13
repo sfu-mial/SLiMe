@@ -38,14 +38,15 @@ def add_base_args(parser):
                                                                             # 'mid_block.attentions[0].transformer_blocks[0].attn2'
                                                                         ])
         
-        parser.add_argument('--gpu_id', type=int, default=0)
-        parser.add_argument('--second_gpu_id', type=int, default=None)
-        parser.add_argument('--train', action='store_true', default=False)
-        parser.add_argument('--dataset', type=str, default='pascal', choices=['sample', 'pascal', 'celeba-hq', 'paper_test'])
-        parser.add_argument('--noise_dir', type=str, default=None)
-        parser.add_argument('--checkpoint_dir', type=str, required=True)
-        parser.add_argument('--part_names', nargs='+', type=str, required=True)
-        return parser
+    parser.add_argument('--gpu_id', type=int, default=0)
+    parser.add_argument('--second_gpu_id', type=int, default=None)
+    parser.add_argument('--train', action='store_true', default=False)
+    parser.add_argument('--dataset', type=str, default='pascal', choices=['sample', 'pascal', 'celeba-hq', 'paper_test'])
+    parser.add_argument('--noise_dir', type=str, default=None)
+    parser.add_argument('--checkpoint_dir', type=str, required=True)
+    parser.add_argument('--part_names', nargs='+', type=str, required=True)
+    parser.add_argument('--objective_to_optimize', type=str, default='text_embedding')
+    return parser
     
 def add_sample_dataset_args(parser):
     parser.add_argument('--src_image_paths', nargs='+', type=str)
@@ -78,6 +79,7 @@ def add_celeba_dataset_args(parser):
 def add_paper_test_dataset_args(parser):
     parser.add_argument('--test_images_dir', type=str)
     parser.add_argument('--test_masks_dir', type=str)
+    return parser
 
 def add_train_args(parser):
     parser.add_argument('--optimizer', type=str, default='Adam')
@@ -90,10 +92,10 @@ def add_train_args(parser):
     return parser
 
 def add_test_args(parser):
-    parser.add_argument('--test_checkpoint_dir', type=str)
-    parser.add_argument('--masking', type=str)
+    parser.add_argument('--masking', type=str, default='zoomed_masking')
     parser.add_argument('--num_crops_per_side', type=int)
     parser.add_argument('--crop_size', type=int)
+    parser.add_argument('--crop_margin', default=10, type=int)
     parser.add_argument('--crop_threshold', type=float)
     parser.add_argument('--zero_pad_test_output', action='store_true', default=False)
     return parser

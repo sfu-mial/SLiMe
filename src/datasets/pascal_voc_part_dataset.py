@@ -401,8 +401,7 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
             train_data_file_ids_file: str = "./data",
             val_data_file_ids_file: str = "./data",
             object_name: str = "car",
-            train_part_names: Tuple[str] = [""],
-            test_part_names: Tuple[str] = [""],
+            part_names: Tuple[str] = [""],
             batch_size: int = 1,
             train_data_ids: Tuple[int] = (2,),
             val_data_ids: Tuple[int] = (2,),
@@ -420,8 +419,7 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
         self.train_data_file_ids_file = train_data_file_ids_file
         self.val_data_file_ids_file = val_data_file_ids_file
         self.object_name = object_name
-        self.train_part_names = train_part_names
-        self.test_part_names = test_part_names
+        self.part_names = part_names
         self.batch_size = batch_size
         self.train_data_ids = train_data_ids
         self.val_data_ids = val_data_ids
@@ -440,7 +438,7 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
             self.train_dataset = PascalVOCPartDataset(
                 data_file_ids_file=self.train_data_file_ids_file,
                 object_name_to_return=self.object_name,
-                part_names_to_return=self.train_part_names,
+                part_names_to_return=self.part_names,
                 object_size_thresh=object_size_thresh[self.object_name],
                 train=True,
                 train_data_ids=self.train_data_ids,
@@ -456,7 +454,7 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
             self.val_dataset = PascalVOCPartDataset(
                 data_file_ids_file=self.train_data_file_ids_file,
                 object_name_to_return=self.object_name,
-                part_names_to_return=self.train_part_names,
+                part_names_to_return=self.part_names,
                 object_size_thresh=object_size_thresh[self.object_name],
                 train=False,
                 train_data_ids=self.val_data_ids,
@@ -472,7 +470,7 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
             self.test_dataset = PascalVOCPartDataset(
                 data_file_ids_file=self.val_data_file_ids_file,
                 object_name_to_return=self.object_name,
-                part_names_to_return=self.test_part_names,
+                part_names_to_return=self.part_names,
                 object_size_thresh=object_size_thresh[self.object_name],
                 train=False,
                 remove_overlapping_objects=self.remove_overlapping_objects,

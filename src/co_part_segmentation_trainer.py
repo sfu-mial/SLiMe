@@ -27,24 +27,29 @@ class CoSegmenterTrainer(pl.LightningModule):
         # else:
         #     self.generate_noise = True
         self.generate_noise = True
-        self.target_image_original = None
-
         self.val_epoch_iou = 0
         self.max_val_iou = 0
+        if self.config.objective_to_optimize == "translator":
+            self.translator = torch.nn.Sequential(
+                torch.nn.Linear(1024, 1024)
+            )
 
 
-        os.makedirs(self.config.train_checkpoint_dir, exist_ok=True)
+        os.makedirs(self.config.checkpoint_dir, exist_ok=True)
 
         self.uncond_embedding, self.text_embedding = self.stable_diffusion.get_text_embeds("", "")
-
-        if self.config.train:
-            uncond_embeddings, text_embeddings = self.stable_diffusion.get_text_embeds("", "")
-            self.token_t = text_embeddings[:, 1:2].clone()
-            self.token_t.requires_grad_(True)
+        
+        if self.config.objective_to_optimize == "text_embedding":
+            if self.config.train:
+                self.token_t = self.text_embedding[:, 1:2].clone()
+                self.token_t.requires_grad_(True)
 
     def on_fit_start(self) -> None:
-        self.stable_diffusion.setup(self.device, torch.device(f"cuda:{self.config.second_gpu_id}"))
-        self.uncond_embedding, self.text_embedding = self.stable_diffusion.get_text_embeds("", "")
+        if self.config.second_gpu_id is None:
+            self.stable_diffusion.setup(self.device)
+        else:
+            self.stable_diffusion.setup(self.device, torch.device(f"cuda:{self.config.second_gpu_id}"))
+        self.uncond_embedding, self.text_embedding = self.uncond_embedding.to(self.device), self.text_embedding.to(self.device)
 
     def on_train_epoch_start(self) -> None:
         self.generate_noise = True
@@ -53,13 +58,19 @@ class CoSegmenterTrainer(pl.LightningModule):
         src_images, mask1 = batch
         mask1 = mask1[0]
         # t = torch.randint(low=10, high=160, size=(1,)).item()
-        _, text_embeddings = self.stable_diffusion.get_text_embeds("", "")
-        self.text_embedding = torch.cat([text_embeddings[:, :1], self.token_t.to(self.stable_diffusion.device), text_embeddings[:, 2:]], dim=1)
+        # _, text_embeddings = self.stable_diffusion.get_text_embeds("", "")
+        if self.config.objective_to_optimize == "text_embedding":
+            text_embedding = torch.cat([self.text_embedding[:, :1], self.token_t.to(self.device), self.text_embedding[:, 2:]], dim=1)
+            t_embedding = torch.cat([self.uncond_embedding, text_embedding])
+        elif self.config.objective_to_optimize == "translator":
+            t_embedding = torch.cat([self.uncond_embedding, self.translator(self.text_embedding)])
+        
         loss, _, sd_cross_attention_maps2, sd_self_attention_maps = self.stable_diffusion.train_step(
-            torch.repeat_interleave(torch.cat([self.uncond_embedding, self.text_embedding]), self.config.batch_size, 0),
+            t_embedding,
             src_images, t=torch.tensor(20),
             back_propagate_loss=False, generate_new_noise=self.generate_noise,
             attention_output_size=self.config.mask_size, token_ids=list(range(77)), train=True, average_layers=True, apply_softmax=False)
+        
         self.generate_noise = False
         loss1 = torch.nn.functional.cross_entropy(sd_cross_attention_maps2[None, ...], mask1[None, ...].type(torch.long))
         sd_cross_attention_maps2 = sd_cross_attention_maps2.softmax(dim=0)
@@ -67,7 +78,7 @@ class CoSegmenterTrainer(pl.LightningModule):
         self_attention_maps = []
         if sd_self_attention_maps is not None:
             small_sd_cross_attention_maps2 = torch.nn.functional.interpolate(sd_cross_attention_maps2[None, ...], 64, mode="bilinear")[0]
-            for i in range(len(self.config.train_part_names)):
+            for i in range(len(self.config.part_names)):
                 self_attention_map = (sd_self_attention_maps[0] * small_sd_cross_attention_maps2[i].flatten()[..., None, None]).sum(dim=0)
                 loss2 = loss2 + torch.nn.functional.mse_loss(self_attention_map, torch.where(mask1 == i, 1., 0.))
                 self_attention_maps.append(((self_attention_map - self_attention_map.min()) / (self_attention_map.max() - self_attention_map.min())).detach().cpu())
@@ -96,86 +107,86 @@ class CoSegmenterTrainer(pl.LightningModule):
 
         return loss
 
-    def get_patched_masks(self, image, crop_size, num_crops_per_side, threshold):
-        crops_coords = get_crops_coords(image.shape[2:], crop_size,
-                                        num_crops_per_side)
+    # def get_patched_masks(self, image, crop_size, num_crops_per_side, threshold):
+    #     crops_coords = get_crops_coords(image.shape[2:], crop_size,
+    #                                     num_crops_per_side)
 
-        final_attention_map = torch.zeros(len(self.config.test_part_names), image.shape[2], image.shape[3])
-        aux_attention_map = torch.zeros(len(self.config.test_part_names), image.shape[2], image.shape[3], dtype=torch.uint8) + 1e-7
+    #     final_attention_map = torch.zeros(len(self.config.test_part_names), image.shape[2], image.shape[3])
+    #     aux_attention_map = torch.zeros(len(self.config.test_part_names), image.shape[2], image.shape[3], dtype=torch.uint8) + 1e-7
 
-        for i in range(num_crops_per_side):
-            for j in range(num_crops_per_side):
-                y_start, y_end, x_start, x_end = crops_coords[i * num_crops_per_side + j]
-                cropped_image = image[:, :, y_start:y_end, x_start:x_end]
-                with torch.no_grad():
-                    loss, _, sd_cross_attention_maps2, sd_self_attention_maps = self.stable_diffusion.train_step(
-                        torch.cat([self.uncond_embedding, self.translator(self.text_embedding)], dim=0), cropped_image,
-                        t=torch.tensor(20), back_propagate_loss=False, generate_new_noise=self.generate_noise,
-                        attention_output_size=64,
-                        token_ids=list(range(len(self.config.test_part_names))), train=False)
-                self.stable_diffusion.attention_maps = {}
-                self_attention_map = \
-                    torch.nn.functional.interpolate(sd_self_attention_maps[0][None, ...],
-                                                    crop_size, mode="bilinear")[0].detach()
+    #     for i in range(num_crops_per_side):
+    #         for j in range(num_crops_per_side):
+    #             y_start, y_end, x_start, x_end = crops_coords[i * num_crops_per_side + j]
+    #             cropped_image = image[:, :, y_start:y_end, x_start:x_end]
+    #             with torch.no_grad():
+    #                 loss, _, sd_cross_attention_maps2, sd_self_attention_maps = self.stable_diffusion.train_step(
+    #                     torch.cat([self.uncond_embedding, self.translator(self.text_embedding)], dim=0), cropped_image,
+    #                     t=torch.tensor(20), back_propagate_loss=False, generate_new_noise=self.generate_noise,
+    #                     attention_output_size=64,
+    #                     token_ids=list(range(len(self.config.test_part_names))), train=False)
+    #             self.stable_diffusion.attention_maps = {}
+    #             self_attention_map = \
+    #                 torch.nn.functional.interpolate(sd_self_attention_maps[0][None, ...],
+    #                                                 crop_size, mode="bilinear")[0].detach()
 
-                # self_attention_map : 64x64, 64, 64
-                # sd_cross_attention_maps2 : len(self.config.test_checkpoint_dir), 64, 64
+    #             # self_attention_map : 64x64, 64, 64
+    #             # sd_cross_attention_maps2 : len(self.config.checkpoint_dir), 64, 64
 
-                attention_maps = sd_cross_attention_maps2.flatten(1, 2).detach()  # len(self.config.test_checkpoint_dir) , 64x64
-                max_values = attention_maps.max(dim=1).values  # len(self.config.test_checkpoint_dir)
-                min_values = attention_maps.min(dim=1).values  # len(self.config.test_checkpoint_dir)
-                passed_indices = torch.where(max_values >= threshold)[0]  #
-                if len(passed_indices) > 0:
-                    passed_attention_maps = attention_maps[passed_indices]
-                    passed_masks = torch.where(passed_attention_maps > passed_attention_maps.mean(1, keepdim=True) + passed_attention_maps.std(1, keepdim=True), 1, 0)
-                    zero_masks_indices = torch.all(passed_masks == 0, dim=1)
-                    if zero_masks_indices.sum() > 0:  # there is at least one mask with all values equal to zero
-                        passed_masks[zero_masks_indices] = torch.where(
-                            passed_attention_maps[zero_masks_indices] > passed_attention_maps.mean(1, keepdim=True)[zero_masks_indices], 1, 0)
-                    for idx, mask_id in enumerate(passed_indices):
-                        masked_pixels_ids = torch.where(passed_masks[idx] == 1)[0]
-                        avg_self_attention_map = (
-                                    passed_attention_maps[idx, masked_pixels_ids][..., None, None] *
-                                    self_attention_map[masked_pixels_ids]).mean(dim=0)
-                        avg_self_attention_map_min = avg_self_attention_map.min()
-                        avg_self_attention_map_max = avg_self_attention_map.max()
-                        coef = (avg_self_attention_map_max - avg_self_attention_map_min) / (
-                                    max_values[mask_id] - min_values[mask_id])
-                        final_attention_map[mask_id, y_start:y_end, x_start:x_end] += (
-                                (avg_self_attention_map / coef) + (
-                                    min_values[mask_id] - avg_self_attention_map_min / coef)).cpu()
-                        # final_attention_map[mask_id, y_start:y_end, x_start:x_end] += (
-                        #             avg_self_attention_map * max_values[mask_id])
-                        aux_attention_map[mask_id, y_start:y_end, x_start:x_end] += (torch.ones_like(avg_self_attention_map, dtype=torch.uint8)).cpu()
+    #             attention_maps = sd_cross_attention_maps2.flatten(1, 2).detach()  # len(self.config.checkpoint_dir) , 64x64
+    #             max_values = attention_maps.max(dim=1).values  # len(self.config.checkpoint_dir)
+    #             min_values = attention_maps.min(dim=1).values  # len(self.config.checkpoint_dir)
+    #             passed_indices = torch.where(max_values >= threshold)[0]  #
+    #             if len(passed_indices) > 0:
+    #                 passed_attention_maps = attention_maps[passed_indices]
+    #                 passed_masks = torch.where(passed_attention_maps > passed_attention_maps.mean(1, keepdim=True) + passed_attention_maps.std(1, keepdim=True), 1, 0)
+    #                 zero_masks_indices = torch.all(passed_masks == 0, dim=1)
+    #                 if zero_masks_indices.sum() > 0:  # there is at least one mask with all values equal to zero
+    #                     passed_masks[zero_masks_indices] = torch.where(
+    #                         passed_attention_maps[zero_masks_indices] > passed_attention_maps.mean(1, keepdim=True)[zero_masks_indices], 1, 0)
+    #                 for idx, mask_id in enumerate(passed_indices):
+    #                     masked_pixels_ids = torch.where(passed_masks[idx] == 1)[0]
+    #                     avg_self_attention_map = (
+    #                                 passed_attention_maps[idx, masked_pixels_ids][..., None, None] *
+    #                                 self_attention_map[masked_pixels_ids]).mean(dim=0)
+    #                     avg_self_attention_map_min = avg_self_attention_map.min()
+    #                     avg_self_attention_map_max = avg_self_attention_map.max()
+    #                     coef = (avg_self_attention_map_max - avg_self_attention_map_min) / (
+    #                                 max_values[mask_id] - min_values[mask_id])
+    #                     final_attention_map[mask_id, y_start:y_end, x_start:x_end] += (
+    #                             (avg_self_attention_map / coef) + (
+    #                                 min_values[mask_id] - avg_self_attention_map_min / coef)).cpu()
+    #                     # final_attention_map[mask_id, y_start:y_end, x_start:x_end] += (
+    #                     #             avg_self_attention_map * max_values[mask_id])
+    #                     aux_attention_map[mask_id, y_start:y_end, x_start:x_end] += (torch.ones_like(avg_self_attention_map, dtype=torch.uint8)).cpu()
 
-        self.stable_diffusion.attention_maps = {}
-        final_attention_map /= aux_attention_map
-        flattened_final_attention_map = final_attention_map.flatten(1, 2)
-        minimum = flattened_final_attention_map.min(1, keepdim=True).values
-        maximum = flattened_final_attention_map.max(1, keepdim=True).values
-        final_mask = torch.where(flattened_final_attention_map > (maximum + minimum) / 2, flattened_final_attention_map,
-                                 0).reshape(*final_attention_map.shape).argmax(0)
+    #     self.stable_diffusion.attention_maps = {}
+    #     final_attention_map /= aux_attention_map
+    #     flattened_final_attention_map = final_attention_map.flatten(1, 2)
+    #     minimum = flattened_final_attention_map.min(1, keepdim=True).values
+    #     maximum = flattened_final_attention_map.max(1, keepdim=True).values
+    #     final_mask = torch.where(flattened_final_attention_map > (maximum + minimum) / 2, flattened_final_attention_map,
+    #                              0).reshape(*final_attention_map.shape).argmax(0)
 
-        return final_mask
+    #     return final_mask
 
     def zoom_and_mask(self, image, threshold, batch_idx):
-        final_attention_map = torch.zeros(len(self.config.test_part_names), image.shape[2], image.shape[3])
+        final_attention_map = torch.zeros(len(self.config.part_names), image.shape[2], image.shape[3])
         # uncond_embeddings, text_embeddings = self.stable_diffusion.get_text_embeds("", "")
         # self.text_embedding = torch.cat([text_embeddings[:, :1], self.token_t.to(self.stable_diffusion.device), text_embeddings[:, 2:]], dim=1)
         # self.uncond_embedding = uncond_embeddings
         with torch.no_grad():
-            loss, _, sd_cross_attention_maps2, sd_self_attention_maps = self.stable_diffusion.train_step(
-                torch.cat([self.uncond_embedding, self.text_embedding], dim=0), image,
+            _, _, sd_cross_attention_maps2, sd_self_attention_maps = self.stable_diffusion.train_step(
+                self.test_t_embedding, image,
                 t=torch.tensor(20), back_propagate_loss=False, generate_new_noise=False,
                 attention_output_size=64,
-                token_ids=list(range(len(self.config.test_part_names))), train=False)
+                token_ids=list(range(len(self.config.part_names))), train=False)
         self_attention_map = sd_self_attention_maps[0].detach()
         self_attention_map = torch.nn.functional.interpolate(self_attention_map[None, ...], (image.shape[2], image.shape[3]), mode="bilinear")[0]
-        attention_maps = sd_cross_attention_maps2.flatten(1, 2).detach()  # len(self.config.test_checkpoint_dir) , 64x64
+        attention_maps = sd_cross_attention_maps2.flatten(1, 2).detach()  # len(self.config.checkpoint_dir) , 64x64
         sd_cross_attention_maps2 = None
         sd_self_attention_maps = None
-        max_values = attention_maps.max(dim=1).values  # len(self.config.test_checkpoint_dir)
-        min_values = attention_maps.min(dim=1).values  # len(self.config.test_checkpoint_dir)
+        max_values = attention_maps.max(dim=1).values  # len(self.config.checkpoint_dir)
+        min_values = attention_maps.min(dim=1).values  # len(self.config.checkpoint_dir)
         passed_indices = torch.where(max_values >= 0)[0]  #
         if len(passed_indices) > 0:
             passed_attention_maps = attention_maps[passed_indices]
@@ -201,33 +212,34 @@ class CoSegmenterTrainer(pl.LightningModule):
         if torch.sum(torch.where(final_mask > 0, 1, 0)) == 0:
             x_start, x_end, y_start, y_end, crop_size = 0, 512, 0, 512, 512
         else:
-            x_start, x_end, y_start, y_end, crop_size = get_square_cropping_coords(torch.where(final_mask > 0, 1, 0), margin=10)
+            x_start, x_end, y_start, y_end, crop_size = get_square_cropping_coords(torch.where(final_mask > 0, 1, 0), margin=self.config.crop_margin)
 
         cropped_image = image[:, :, y_start:y_end, x_start:x_end]
         image_grid = torchvision.utils.make_grid(cropped_image)
         self.logger.experiment.add_image("test cropped mask", image_grid, batch_idx)
 
-        final_attention_map = torch.zeros(len(self.config.test_part_names), crop_size, crop_size)
+        final_attention_map = torch.zeros(len(self.config.part_names), crop_size, crop_size)
         # uncond_embeddings, text_embeddings = self.stable_diffusion.get_text_embeds("", "")
         # self.text_embedding = torch.cat([text_embeddings[:, :1], self.token_t.to(self.stable_diffusion.device), text_embeddings[:, 2:]], dim=1)
         # self.uncond_embedding = uncond_embeddings
+
         with torch.no_grad():
-            loss, _, sd_cross_attention_maps2, sd_self_attention_maps = self.stable_diffusion.train_step(
-                torch.cat([self.uncond_embedding, self.text_embedding], dim=0), cropped_image,
+            _, _, sd_cross_attention_maps2, sd_self_attention_maps = self.stable_diffusion.train_step(
+                self.test_t_embedding, cropped_image,
                 t=torch.tensor(20), back_propagate_loss=False, generate_new_noise=False,
                 attention_output_size=64,
-                token_ids=list(range(len(self.config.test_part_names))), train=False)
+                token_ids=list(range(len(self.config.part_names))), train=False)
 
         self_attention_map = \
             torch.nn.functional.interpolate(sd_self_attention_maps[0][None, ...],
                                             crop_size, mode="bilinear")[0].detach()
 
         # self_attention_map : 64x64, 64, 64
-        # sd_cross_attention_maps2 : len(self.config.test_checkpoint_dir), 64, 64
+        # sd_cross_attention_maps2 : len(self.config.checkpoint_dir), 64, 64
 
-        attention_maps = sd_cross_attention_maps2.flatten(1, 2).detach()  # len(self.config.test_checkpoint_dir) , 64x64
-        max_values = attention_maps.max(dim=1).values  # len(self.config.test_checkpoint_dir)
-        min_values = attention_maps.min(dim=1).values  # len(self.config.test_checkpoint_dir)
+        attention_maps = sd_cross_attention_maps2.flatten(1, 2).detach()  # len(self.config.checkpoint_dir) , 64x64
+        max_values = attention_maps.max(dim=1).values  # len(self.config.checkpoint_dir)
+        min_values = attention_maps.min(dim=1).values  # len(self.config.checkpoint_dir)
         passed_indices = torch.where(max_values >= threshold)[0]  #
         if len(passed_indices) > 0:
             passed_attention_maps = attention_maps[passed_indices]
@@ -253,10 +265,11 @@ class CoSegmenterTrainer(pl.LightningModule):
         return final_mask
 
     def on_validation_start(self):
-        uncond_embeddings, text_embeddings = self.stable_diffusion.get_text_embeds("", "")
-        self.text_embedding = torch.cat(
-            [text_embeddings[:, :1], self.token_t.to(self.stable_diffusion.device), text_embeddings[:, 2:]], dim=1)
-        self.uncond_embedding = uncond_embeddings
+        if self.config.objective_to_optimize == "text_embedding":
+            text_embedding = torch.cat([self.text_embedding[:, :1], self.token_t.to(self.device), self.text_embedding[:, 2:]], dim=1)
+            self.test_t_embedding = torch.cat([self.uncond_embedding, text_embedding])
+        elif self.config.objective_to_optimize == "translator":
+            self.test_t_embedding = torch.cat([self.uncond_embedding, self.translator(self.text_embedding)])
 
     def validation_step(self, batch, batch_idx):
         image, mask = batch
@@ -281,7 +294,7 @@ class CoSegmenterTrainer(pl.LightningModule):
         self.logger.experiment.add_image("val image", image_grid, batch_idx)
 
         ious = []
-        for idx, part_name in enumerate(self.config.test_part_names):
+        for idx, part_name in enumerate(self.config.part_names):
             part_mask = torch.where(mask.cpu() == idx, 1, 0).type(torch.uint8)
             if torch.all(part_mask == 0):
                 continue
@@ -297,19 +310,32 @@ class CoSegmenterTrainer(pl.LightningModule):
     def on_validation_epoch_end(self):
         if self.val_epoch_iou >= self.max_val_iou:
             self.max_val_iou = self.val_epoch_iou
-            torch.save(self.token_t,
-                       os.path.join(self.config.train_checkpoint_dir, "token_t.pth"))
+            if self.config.objective_to_optimize == "text_embedding":
+                torch.save(self.token_t,
+                        os.path.join(self.config.checkpoint_dir, "token_t.pth"))
+            elif self.config.objective_to_optimize == "translator":
+                torch.save(self.translator.state_dict(),
+                        os.path.join(self.config.checkpoint_dir, "translator.pth"))
             torch.save(self.stable_diffusion.noise.cpu(),
-                       os.path.join(self.config.train_checkpoint_dir, "noise.pth"))
+                       os.path.join(self.config.checkpoint_dir, "noise.pth"))
 
     def on_test_start(self) -> None:
-        self.stable_diffusion.setup(self.device, torch.device(f"cuda:{self.config.second_gpu_id}"))
+        if self.config.second_gpu_id is None:
+            self.stable_diffusion.setup(self.device)
+        else:
+            self.stable_diffusion.setup(self.device, torch.device(f"cuda:{self.config.second_gpu_id}"))
         self.stable_diffusion.change_hooks(attention_layers_to_use=self.config.attention_layers_to_use)  # exclude self attention layer
-        self.uncond_embedding, self.text_embedding = self.stable_diffusion.get_text_embeds("", "")
-        token_t = torch.load(os.path.join(self.config.test_checkpoint_dir, "token_t.pth"))
-        noise = torch.load(os.path.join(self.config.test_checkpoint_dir, "noise.pth"))
-        self.text_embedding = torch.cat(
-            [self.text_embedding[:, :1], token_t.to(self.stable_diffusion.device), self.text_embedding[:, 2:]], dim=1)
+        uncond_embedding, text_embedding = self.stable_diffusion.get_text_embeds("", "")
+        if self.config.objective_to_optimize == "text_embedding":
+            token_t = torch.load(os.path.join(self.config.checkpoint_dir, "token_t.pth"))
+            text_embedding = torch.cat(
+                [text_embedding[:, :1], token_t.to(self.stable_diffusion.device), text_embedding[:, 2:]], dim=1)
+            self.test_t_embedding = torch.cat([uncond_embedding, text_embedding])
+        elif self.config.objective_to_optimize == "translator":
+            self.translator.load_state_dict(torch.load(os.path.join(self.config.checkpoint_dir, "translator.pth")))
+            self.test_t_embedding = torch.cat([uncond_embedding, self.translator(text_embedding)])
+        
+        noise = torch.load(os.path.join(self.config.checkpoint_dir, "noise.pth"))
         self.stable_diffusion.noise = noise.to(self.stable_diffusion.device)
 
     def test_step(self, batch, batch_idx):
@@ -345,7 +371,7 @@ class CoSegmenterTrainer(pl.LightningModule):
         if mask_provided:
             mask_grid = torchvision.utils.make_grid(mask[None, ...] / mask[None, ...].max())
             self.logger.experiment.add_image("test mask", mask_grid, batch_idx)
-            for idx, part_name in enumerate(self.config.test_part_names):
+            for idx, part_name in enumerate(self.config.part_names):
                 part_mask = torch.where(mask.cpu() == idx, 1, 0).type(torch.uint8)
                 if torch.all(part_mask == 0):
                     continue
@@ -356,10 +382,15 @@ class CoSegmenterTrainer(pl.LightningModule):
         return torch.tensor(0.)
 
     def configure_optimizers(self):
+        if self.config.objective_to_optimize == "translator":
+            params = self.translator.parameters()
+        elif self.config.objective_to_optimize == "text_embedding":
+            params = [self.token_t]
         optimizer = getattr(optim, self.config.optimizer)(
             [
-                {'params': [self.token_t], 'lr': self.config.lr_1},
+                {'params': params},
+                # {'params': [self.token_t], 'lr': self.config.lr},
             ],
-            lr=self.config.lr_1,
+            lr=self.config.lr,
         )
         return {"optimizer": optimizer}
