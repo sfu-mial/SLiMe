@@ -1,6 +1,7 @@
 module load python/3.6 cuda cudnn
 
 source /home/aka225/cps_env/bin/activate
+cd ~/scratch/code/one_shot_segmentation
 
 python3 -m src.main  --base_dir '/home/aka225/scratch/outputs' \
                     --train \
@@ -18,7 +19,7 @@ python3 -m src.main  --base_dir '/home/aka225/scratch/outputs' \
                     --epochs 40 \
                     --self_attention_loss_coef 1 \
                     --lr 0.1 \
-                    --crop_margin 10 \
+                    --crop_margin 40 \
                     --mask_size 128 \
                     --crop_threshold 0.2 \
                     --val_data_ids 200 201 202 203 204 205 206 207 208 209 \

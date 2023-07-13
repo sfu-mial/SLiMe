@@ -43,6 +43,8 @@ class CoSegmenterTrainer(pl.LightningModule):
             if self.config.train:
                 self.token_t = self.text_embedding[:, 1:2].clone()
                 self.token_t.requires_grad_(True)
+                self.token_0 = self.text_embedding[:, 0:1].clone()
+                self.token_0.requires_grad_(True)
 
     def on_fit_start(self) -> None:
         if self.config.second_gpu_id is None:
@@ -60,7 +62,7 @@ class CoSegmenterTrainer(pl.LightningModule):
         # t = torch.randint(low=10, high=160, size=(1,)).item()
         # _, text_embeddings = self.stable_diffusion.get_text_embeds("", "")
         if self.config.objective_to_optimize == "text_embedding":
-            text_embedding = torch.cat([self.text_embedding[:, :1], self.token_t.to(self.device), self.text_embedding[:, 2:]], dim=1)
+            text_embedding = torch.cat([self.token_0.to(self.device), self.token_t.to(self.device), self.text_embedding[:, 2:]], dim=1)
             t_embedding = torch.cat([self.uncond_embedding, text_embedding])
         elif self.config.objective_to_optimize == "translator":
             t_embedding = torch.cat([self.uncond_embedding, self.translator(self.text_embedding)])
@@ -69,7 +71,7 @@ class CoSegmenterTrainer(pl.LightningModule):
             t_embedding,
             src_images, t=torch.tensor(20),
             back_propagate_loss=False, generate_new_noise=self.generate_noise,
-            attention_output_size=self.config.mask_size, token_ids=list(range(77)), train=True, average_layers=True, apply_softmax=False)
+            attention_output_size=self.config.mask_size, token_ids=list(range(2)), train=True, average_layers=True, apply_softmax=False)
         
         self.generate_noise = False
         loss1 = torch.nn.functional.cross_entropy(sd_cross_attention_maps2[None, ...], mask1[None, ...].type(torch.long))
@@ -266,7 +268,7 @@ class CoSegmenterTrainer(pl.LightningModule):
 
     def on_validation_start(self):
         if self.config.objective_to_optimize == "text_embedding":
-            text_embedding = torch.cat([self.text_embedding[:, :1], self.token_t.to(self.device), self.text_embedding[:, 2:]], dim=1)
+            text_embedding = torch.cat([self.token_0.to(self.device), self.token_t.to(self.device), self.text_embedding[:, 2:]], dim=1)
             self.test_t_embedding = torch.cat([self.uncond_embedding, text_embedding])
         elif self.config.objective_to_optimize == "translator":
             self.test_t_embedding = torch.cat([self.uncond_embedding, self.translator(self.text_embedding)])
@@ -313,6 +315,8 @@ class CoSegmenterTrainer(pl.LightningModule):
             if self.config.objective_to_optimize == "text_embedding":
                 torch.save(self.token_t,
                         os.path.join(self.config.checkpoint_dir, "token_t.pth"))
+                torch.save(self.token_0,
+                        os.path.join(self.config.checkpoint_dir, "token_0.pth"))
             elif self.config.objective_to_optimize == "translator":
                 torch.save(self.translator.state_dict(),
                         os.path.join(self.config.checkpoint_dir, "translator.pth"))
@@ -328,8 +332,9 @@ class CoSegmenterTrainer(pl.LightningModule):
         uncond_embedding, text_embedding = self.stable_diffusion.get_text_embeds("", "")
         if self.config.objective_to_optimize == "text_embedding":
             token_t = torch.load(os.path.join(self.config.checkpoint_dir, "token_t.pth"))
+            token_0 = torch.load(os.path.join(self.config.checkpoint_dir, "token_0.pth"))
             text_embedding = torch.cat(
-                [text_embedding[:, :1], token_t.to(self.stable_diffusion.device), text_embedding[:, 2:]], dim=1)
+                [token_0.to(self.stable_diffusion.device), token_t.to(self.stable_diffusion.device), text_embedding[:, 2:]], dim=1)
             self.test_t_embedding = torch.cat([uncond_embedding, text_embedding])
         elif self.config.objective_to_optimize == "translator":
             self.translator.load_state_dict(torch.load(os.path.join(self.config.checkpoint_dir, "translator.pth")))
@@ -385,7 +390,7 @@ class CoSegmenterTrainer(pl.LightningModule):
         if self.config.objective_to_optimize == "translator":
             params = self.translator.parameters()
         elif self.config.objective_to_optimize == "text_embedding":
-            params = [self.token_t]
+            params = [self.token_0, self.token_t]
         optimizer = getattr(optim, self.config.optimizer)(
             [
                 {'params': params},

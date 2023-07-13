@@ -1,7 +1,7 @@
 module load python/3.6 cuda cudnn
 
 source /home/aka225/cps_env/bin/activate
-
+cd ~/scratch/code/one_shot_segmentation
 python3 -m src.main  --base_dir '/home/aka225/scratch/outputs' \
                     --train \
                     --dataset 'celeba-hq' \
