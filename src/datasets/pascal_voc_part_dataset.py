@@ -97,8 +97,8 @@ part_mapping = {
 
 
 def get_file_dirs(annotation_file):
-    ann_file_path = f"/home/aliasgahr/Downloads/part_segmentation/trainval/Annotations_Part/{annotation_file}"
-    img_file_path = f"/home/aliasgahr/Downloads/part_segmentation/VOCtrainval_03-May-2010/VOCdevkit/VOC2010/JPEGImages/{annotation_file.replace('mat', 'jpg')}"
+    ann_file_path = f"/home/aka225/scratch/data/Annotations_Part/{annotation_file}"
+    img_file_path = f"/home/aka225/scratch/data/VOCdevkit/VOC2010/JPEGImages/{annotation_file.replace('mat', 'jpg')}"
 
     return ann_file_path, img_file_path
 

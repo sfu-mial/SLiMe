@@ -10,8 +10,8 @@ python3 -m src.main  --base_dir '/home/aka225/scratch/outputs' \
                     --objective_to_optimize 'text_embedding' \
                     --object_name 'horse' \
                     --part_names 'background' 'neck+torso' \
-                    --train_data_file_ids_file 'self.train_data_file_ids_file = "/home/aliasgahr/Downloads/part_segmentation/VOCtrainval_03-May-2010/VOCdevkit/VOC2010/ImageSets/Main/horse_train.txt' \
-                    --val_data_file_ids_file 'self.train_data_file_ids_file = "/home/aliasgahr/Downloads/part_segmentation/VOCtrainval_03-May-2010/VOCdevkit/VOC2010/ImageSets/Main/horse_val.txt' \
+                    --train_data_file_ids_file '/home/aka225/scratch/data/VOCdevkit/VOC2010/ImageSets/Main/horse_train.txt' \
+                    --val_data_file_ids_file '/home/aka225/scratch/data/VOCdevkit/VOC2010/ImageSets/Main/horse_val.txt' \
                     --remove_overlapping_objects \
                     --object_overlapping_threshold 0.05 \
                     --single_object \
