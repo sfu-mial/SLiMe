@@ -35,8 +35,6 @@ class CoSegmenterTrainer(pl.LightningModule):
             )
 
 
-        os.makedirs(self.config.checkpoint_dir, exist_ok=True)
-
         self.uncond_embedding, self.text_embedding = self.stable_diffusion.get_text_embeds("", "")
         
         if self.config.objective_to_optimize == "text_embedding":
@@ -46,7 +44,11 @@ class CoSegmenterTrainer(pl.LightningModule):
                 self.token_0 = self.text_embedding[:, 0:1].clone()
                 self.token_0.requires_grad_(True)
 
+        self.checkpoint_dir = self.config.checkpoint_dir
+
     def on_fit_start(self) -> None:
+        self.checkpoint_dir = f"{self.config.checkpoint_dir}_{self.logger.log_dir.split('/')[-1]}"
+        os.makedirs(self.checkpoint_dir, exist_ok=True)
         if self.config.second_gpu_id is None:
             self.stable_diffusion.setup(self.device)
         else:
@@ -94,18 +96,22 @@ class CoSegmenterTrainer(pl.LightningModule):
         self.log("loss2", loss2.detach().cpu(), on_step=True, sync_dist=True)
         self.log("loss", loss.detach().cpu(), on_step=True, sync_dist=True)
 
-        if sd_self_attention_maps is not None:
-            self_attention_map_grid = torchvision.utils.make_grid(self_attention_maps.unsqueeze(dim=1))
-            self.logger.experiment.add_image("train self attention map", self_attention_map_grid, self.counter)
+        if self.config.log_images:
+            if sd_self_attention_maps is not None:
+                # self_attention_map_grid = torchvision.utils.make_grid(self_attention_maps.unsqueeze(dim=1))
+                # self.logger.experiment.add_image("train self attention map", self_attention_map_grid, self.counter)
+                self.logger.log_image(key="train self attention map", images=self_attention_maps.unsqueeze(dim=1), step=self.counter)
+            # images_grid = torchvision.utils.make_grid(src_images.detach().cpu())
+            # sd_attention_maps_grid2 = torchvision.utils.make_grid(sd_cross_attention_maps2.detach().cpu())
+            # mask1_grid = torchvision.utils.make_grid(mask1[None, ...].detach().cpu()/mask1[None, ...].detach().cpu().max())
 
-        images_grid = torchvision.utils.make_grid(src_images.detach().cpu())
-        sd_attention_maps_grid2 = torchvision.utils.make_grid(sd_cross_attention_maps2.detach().cpu())
-        mask1_grid = torchvision.utils.make_grid(mask1[None, ...].detach().cpu()/mask1[None, ...].detach().cpu().max())
-
-        self.logger.experiment.add_image("train image", images_grid, self.counter)
-        self.logger.experiment.add_image("train sd attention maps2", sd_attention_maps_grid2, self.counter)
-        self.logger.experiment.add_image("train mask1", mask1_grid, self.counter)
-        self.counter += 1
+            # self.logger.experiment.add_image("train image", images_grid, self.counter)
+            # self.logger.experiment.add_image("train sd attention maps2", sd_attention_maps_grid2, self.counter)
+            # self.logger.experiment.add_image("train mask1", mask1_grid, self.counter)
+            self.logger.log_image(key="train image", images=src_images.detach().cpu(), step=self.counter)
+            self.logger.log_image(key="train sd attention maps2", images=sd_cross_attention_maps2.detach().cpu(), step=self.counter)
+            self.logger.log_image(key="train mask1", images=mask1[None, ...].detach().cpu(), step=self.counter)
+            self.counter += 1
 
         return loss
 
@@ -214,12 +220,13 @@ class CoSegmenterTrainer(pl.LightningModule):
         if torch.sum(torch.where(final_mask > 0, 1, 0)) == 0:
             x_start, x_end, y_start, y_end, crop_size = 0, 512, 0, 512, 512
         else:
-            x_start, x_end, y_start, y_end, crop_size = get_square_cropping_coords(torch.where(final_mask > 0, 1, 0), margin=self.config.crop_margin)
+            x_start, x_end, y_start, y_end, crop_size = get_square_cropping_coords(torch.where(final_mask > 0, 1, 0), min_square_size=self.config.min_square_size)
 
         cropped_image = image[:, :, y_start:y_end, x_start:x_end]
-        image_grid = torchvision.utils.make_grid(cropped_image)
-        self.logger.experiment.add_image("test cropped mask", image_grid, batch_idx)
-
+        # image_grid = torchvision.utils.make_grid(cropped_image)
+        # self.logger.experiment.add_image("test cropped mask", image_grid, batch_idx)
+        if self.config.log_images:
+            self.logger.log_image(key="test cropped mask", images=cropped_image)
         final_attention_map = torch.zeros(len(self.config.part_names), crop_size, crop_size)
         # uncond_embeddings, text_embeddings = self.stable_diffusion.get_text_embeds("", "")
         # self.text_embedding = torch.cat([text_embeddings[:, :1], self.token_t.to(self.stable_diffusion.device), text_embeddings[:, 2:]], dim=1)
@@ -287,14 +294,17 @@ class CoSegmenterTrainer(pl.LightningModule):
                                             self.config.crop_threshold,
                                             batch_idx)
         final_mask = final_mask.cpu()
-        predicted_mask_grid = torchvision.utils.make_grid(final_mask / final_mask.max())
-        image_grid = torchvision.utils.make_grid(image)
-        mask_grid = torchvision.utils.make_grid(mask[None, ...] / mask[None, ...].max())
+        if self.config.log_images:
+            # predicted_mask_grid = torchvision.utils.make_grid(final_mask / final_mask.max())
+            # image_grid = torchvision.utils.make_grid(image)
+            # mask_grid = torchvision.utils.make_grid(mask[None, ...] / mask[None, ...].max())
 
-        self.logger.experiment.add_image("val mask", mask_grid, batch_idx)
-        self.logger.experiment.add_image("val predicted mask", predicted_mask_grid, batch_idx)
-        self.logger.experiment.add_image("val image", image_grid, batch_idx)
-
+            # self.logger.experiment.add_image("val mask", mask_grid, batch_idx)
+            # self.logger.experiment.add_image("val predicted mask", predicted_mask_grid, batch_idx)
+            # self.logger.experiment.add_image("val image", image_grid, batch_idx)
+            self.logger.log_image(key="val mask", images=mask[None, ...], step=batch_idx)
+            self.logger.log_image(key="val image", images=image, step=batch_idx)
+            self.logger.log_image(key="val predicted mask", images=final_mask, step=batch_idx)
         ious = []
         for idx, part_name in enumerate(self.config.part_names):
             part_mask = torch.where(mask.cpu() == idx, 1, 0).type(torch.uint8)
@@ -314,14 +324,14 @@ class CoSegmenterTrainer(pl.LightningModule):
             self.max_val_iou = self.val_epoch_iou
             if self.config.objective_to_optimize == "text_embedding":
                 torch.save(self.token_t,
-                        os.path.join(self.config.checkpoint_dir, "token_t.pth"))
+                        os.path.join(self.checkpoint_dir, "token_t.pth"))
                 torch.save(self.token_0,
-                        os.path.join(self.config.checkpoint_dir, "token_0.pth"))
+                        os.path.join(self.checkpoint_dir, "token_0.pth"))
             elif self.config.objective_to_optimize == "translator":
                 torch.save(self.translator.state_dict(),
-                        os.path.join(self.config.checkpoint_dir, "translator.pth"))
+                        os.path.join(self.checkpoint_dir, "translator.pth"))
             torch.save(self.stable_diffusion.noise.cpu(),
-                       os.path.join(self.config.checkpoint_dir, "noise.pth"))
+                       os.path.join(self.checkpoint_dir, "noise.pth"))
 
     def on_test_start(self) -> None:
         if self.config.second_gpu_id is None:
@@ -331,16 +341,16 @@ class CoSegmenterTrainer(pl.LightningModule):
         self.stable_diffusion.change_hooks(attention_layers_to_use=self.config.attention_layers_to_use)  # exclude self attention layer
         uncond_embedding, text_embedding = self.stable_diffusion.get_text_embeds("", "")
         if self.config.objective_to_optimize == "text_embedding":
-            token_t = torch.load(os.path.join(self.config.checkpoint_dir, "token_t.pth"))
-            token_0 = torch.load(os.path.join(self.config.checkpoint_dir, "token_0.pth"))
+            token_t = torch.load(os.path.join(self.checkpoint_dir, "token_t.pth"))
+            token_0 = torch.load(os.path.join(self.checkpoint_dir, "token_0.pth"))
             text_embedding = torch.cat(
                 [token_0.to(self.stable_diffusion.device), token_t.to(self.stable_diffusion.device), text_embedding[:, 2:]], dim=1)
             self.test_t_embedding = torch.cat([uncond_embedding, text_embedding])
         elif self.config.objective_to_optimize == "translator":
-            self.translator.load_state_dict(torch.load(os.path.join(self.config.checkpoint_dir, "translator.pth")))
+            self.translator.load_state_dict(torch.load(os.path.join(self.checkpoint_dir, "translator.pth")))
             self.test_t_embedding = torch.cat([uncond_embedding, self.translator(text_embedding)])
         
-        noise = torch.load(os.path.join(self.config.checkpoint_dir, "noise.pth"))
+        noise = torch.load(os.path.join(self.checkpoint_dir, "noise.pth"))
         self.stable_diffusion.noise = noise.to(self.stable_diffusion.device)
 
     def test_step(self, batch, batch_idx):
@@ -359,23 +369,27 @@ class CoSegmenterTrainer(pl.LightningModule):
                                             self.config.crop_threshold,
                                             batch_idx)
         final_mask = final_mask.cpu()
+        if self.config.log_images:
+            # predicted_mask_grid = torchvision.utils.make_grid(final_mask/final_mask.max())
+            masked_image = image[0].cpu() * (
+                        1 - final_mask[None, ...]) + torch.stack(
+                    [final_mask * 0, final_mask * 0, final_mask], dim=0)
+            # masked_image_grid = torchvision.utils.make_grid(
+            #     masked_image)
 
-        predicted_mask_grid = torchvision.utils.make_grid(final_mask/final_mask.max())
+            # image_grid = torchvision.utils.make_grid(image)
 
-        masked_image_grid = torchvision.utils.make_grid(
-            image[0].cpu() * (
-                    1 - final_mask[None, ...]) + torch.stack(
-                [final_mask * 0, final_mask * 0, final_mask], dim=0))
-
-        image_grid = torchvision.utils.make_grid(image)
-
-        self.logger.experiment.add_image("test predicted mask", predicted_mask_grid, batch_idx)
-        self.logger.experiment.add_image("test masked image", masked_image_grid, batch_idx)
-        self.logger.experiment.add_image("test image", image_grid, batch_idx)
-
+            # self.logger.experiment.add_image("test predicted mask", predicted_mask_grid, batch_idx)
+            # self.logger.experiment.add_image("test masked image", masked_image_grid, batch_idx)
+            # self.logger.experiment.add_image("test image", image_grid, batch_idx)
+            self.logger.log_image(key="test predicted mask", images=final_mask[None, ...], step=batch_idx)
+            self.logger.log_image(key="test masked image", images=masked_image[None, ...], step=batch_idx)
+            self.logger.log_image(key="test image", images=image, step=batch_idx)
         if mask_provided:
-            mask_grid = torchvision.utils.make_grid(mask[None, ...] / mask[None, ...].max())
-            self.logger.experiment.add_image("test mask", mask_grid, batch_idx)
+            if self.config.log_images:
+                # mask_grid = torchvision.utils.make_grid(mask[None, ...] / mask[None, ...].max())
+                # self.logger.experiment.add_image("test mask", mask_grid, batch_idx)
+                self.logger.log_image(key="test mask", images=mask[None, ...], step=batch_idx)
             for idx, part_name in enumerate(self.config.part_names):
                 part_mask = torch.where(mask.cpu() == idx, 1, 0).type(torch.uint8)
                 if torch.all(part_mask == 0):

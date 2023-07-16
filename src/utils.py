@@ -16,16 +16,16 @@ def adjust_bbox_coords(long_side_length, short_side_length, short_side_coord_min
     return short_side_coord_min, short_side_coord_max
 
 
-def get_square_cropping_coords(mask, square_size=None, margin=None):
+def get_square_cropping_coords(mask, min_square_size=None, margin=None):
     ys, xs = torch.where(mask == 1)
     x_start, x_end, y_start, y_end = xs.min().item(), xs.max().item() + 1, ys.min().item(), ys.max().item() + 1
     w, h = x_end - x_start, y_end - y_start
     if margin is not None:
-        square_size = min(max(w, h) + margin, 512)
-    if square_size is not None:
+        min_square_size = min(max(w, h) + margin, 512)
+    if min_square_size is not None and max(w, h) < min_square_size:
         if w < h:
-            # diff = max(square_size, h) - h
-            diff = square_size - h
+            # diff = max(min_square_size, h) - h
+            diff = min_square_size - h
             offset_start, offset_end = math.ceil(diff / 2), math.floor(diff / 2)
             if y_start - math.ceil(diff / 2) < 0:
                 offset_end -= y_start - math.ceil(diff / 2)
@@ -38,7 +38,7 @@ def get_square_cropping_coords(mask, square_size=None, margin=None):
 
         elif h < w:
             # diff = max(512 // 2, w) - w
-            diff = square_size - w
+            diff = min_square_size - w
             offset_start, offset_end = math.ceil(diff / 2), math.floor(diff / 2)
             if x_start - math.ceil(diff / 2) < 0:
                 offset_end -= x_start - math.ceil(diff / 2)

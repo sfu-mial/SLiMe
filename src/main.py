@@ -1,4 +1,5 @@
 import pytorch_lightning as pl
+from pytorch_lightning.loggers import WandbLogger
 
 from src.co_part_segmentation_trainer import (
     CoSegmenterTrainer,
@@ -14,6 +15,8 @@ def main():
     # torch.manual_seed(42)
     config = init_args()
     # config = Config()
+    # wandb_logger = WandbLogger()
+
     if config.dataset == "sample":
         dm = SampleDataModule(
             src_image_dirs=config.src_image_paths,
@@ -74,6 +77,7 @@ def main():
         max_epochs=config.epochs,
         devices=gpu_id,
         # precision=16,
+        # logger=wandb_logger,
         log_every_n_steps=1,
         # accumulate_grad_batches=config.train_num_crops // config.batch_size,
         enable_checkpointing=False,

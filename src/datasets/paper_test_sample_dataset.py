@@ -1,4 +1,3 @@
-import math
 import os
 
 import pytorch_lightning as pl
@@ -6,43 +5,43 @@ import torch
 from PIL import Image
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
-from torchvision import transforms
 from glob import glob
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 import cv2
 import numpy as np
 
+car_part_color_mappings = {
+    'body': [255, 52, 255],
+    'light': [255, 74, 70],
+    'plate': [0, 137, 65],
+    'wheel': [255, 255, 0],
+    'window': [28, 230, 255]
+}
 
-car_part_color_mappings = [
-    # [255, 52, 255],  # body
-    # [255, 74, 70],  # light
-    # [0, 137, 65],  # plate
-    # [255, 255, 0],  # wheel
-    [28, 230, 255]  # window
-]
-
-horse_part_color_mappings = [
-    [255, 255, 0],  # head
-    [0, 0, 255],  # leg
-    [255, 0, 0],  # neck+torso
-    [0, 255, 0],  # tail
-]
+horse_part_color_mappings = {
+    'head': [255, 255, 0], # head
+    'leg': [0, 0, 255],  # leg
+    'neck+torso': [255, 0, 0],  # neck+torso
+    'tail': [0, 255, 0],  # tail
+}
 
 
 class PaperTestSampleDataset(Dataset):
-    def __init__(self, images_dir, masks_dir, train=True, mask_size=128, zero_pad_test_output=False):
+    def __init__(self, images_dir, masks_dir, train=True, mask_size=128, zero_pad_test_output=False, object_name='car', part_name='body'):
         self.image_dirs = sorted(glob(os.path.join(images_dir, "*")))
         self.mask_dirs = sorted(glob(os.path.join(masks_dir, "*")))
         self.train = train
         self.mask_size = mask_size
+        self.object_name = object_name
+        self.part_name = part_name
         self.train_transform = A.Compose([
             A.LongestMaxSize(512),
             A.PadIfNeeded(512, 512, border_mode=cv2.BORDER_CONSTANT, value=0,
                           mask_value=0),
             A.HorizontalFlip(),
-            A.RandomScale((0.5, 2), always_apply=True),
-            A.RandomResizedCrop(512, 512, (0.5, 1)),
+            # A.RandomScale((0.5, 2), always_apply=True),
+            A.RandomResizedCrop(512, 512, (0.2, 1)),
             A.Rotate((-10, 10), border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0),
             ToTensorV2()
         ])
@@ -91,15 +90,26 @@ class PaperTestSampleDataset(Dataset):
         # image = transforms.functional.resize(image, size=512)
         # mask = transforms.functional.resize(mask, size=512,
         #                                     interpolation=transforms.InterpolationMode.NEAREST)
-        final_mask = np.zeros(mask.shape[:2])
-        for idx, part_color in enumerate(car_part_color_mappings):
-            final_mask += np.where(np.all(mask == np.array(part_color)[None, None, ...], 2), idx+1, 0)
+        # final_mask = np.zeros(mask.shape[:2])
+        # for idx, part_color in enumerate(car_part_color_mappings):
+        if self.object_name == 'car':
+            part_mapping = car_part_color_mappings
+        else:
+            part_mapping = horse_part_color_mappings
+        final_mask = np.where(np.all(mask == np.array(part_mapping[self.part_name])[None, None, ...], 2), 1, 0)
         # final_mask = transforms.functional.resize(final_mask, size=512, interpolation=transforms.InterpolationMode.NEAREST)
 
         if self.train:
-            result = self.train_transform(image=np.array(image), mask=final_mask)
+            mask_is_included = False
+            while not mask_is_included:
+                result = self.train_transform(image=np.array(image), mask=final_mask)
+                # mask = torch.as_tensor(result["mask"])
+                if np.where(result["mask"] > 0, 1, 0).sum() > 2000:
+                    mask_is_included = True
             image = result["image"]
             mask = torch.as_tensor(result["mask"])
+            mask = \
+                torch.nn.functional.interpolate(mask[None, None, ...].type(torch.float), self.mask_size, mode="nearest")[0, 0]
             # crop_size = torch.randint(low=400, high=512, size=(1,)).item()
             # crop_params = transforms.RandomCrop.get_params(image, (crop_size, crop_size))
             # image = transforms.functional.crop(image, *crop_params)
@@ -128,33 +138,43 @@ class PaperTestSampleDataset(Dataset):
 class PaperTestSampleDataModule(pl.LightningDataModule):
     def __init__(
             self,
-            test_images_dir: str = "./data",
-            test_masks_dir: str = "./data",
+            oajbect_name: str = 'car',
+            part_name: str = "body",
+            images_dir: str = "./data",
+            masks_dir: str = "./data",
             mask_size: int = 128,
             zero_pad_test_output: bool = False,
     ):
         super().__init__()
-        self.test_images_dir = test_images_dir
-        self.test_masks_dir = test_masks_dir
+        self.oajbect_name = oajbect_name
+        self.part_name = part_name
+        self.images_dir = images_dir
+        self.masks_dir = masks_dir
         self.mask_size = mask_size
         self.zero_pad_test_output = zero_pad_test_output
 
     def setup(self, stage: str):
-        self.train_dataset = PaperTestSampleDataset(
-            images_dir=self.test_images_dir,
-            masks_dir=self.test_masks_dir,
-            train=True,
-            mask_size=self.mask_size,
-        )
-        self.test_dataset = PaperTestSampleDataset(
-            images_dir=self.test_images_dir,
-            masks_dir=self.test_masks_dir,
-            train=False,
-            zero_pad_test_output=self.zero_pad_test_output,
-        )
+        if stage == 'fit':
+            self.train_dataset = PaperTestSampleDataset(
+                images_dir=self.images_dir,
+                masks_dir=self.masks_dir,
+                train=True,
+                mask_size=self.mask_size,
+                part_name=self.part_name,
+                object_name=self.object_name,
+            )
+        if stage == 'test':
+            self.test_dataset = PaperTestSampleDataset(
+                images_dir=self.images_dir,
+                masks_dir=self.masks_dir,
+                train=False,
+                zero_pad_test_output=self.zero_pad_test_output,
+                part_name=self.part_name,
+                object_name=self.object_name,
+            )
 
     def train_dataloader(self):
-        return DataLoader(self.train_dataset, batch_size=1, num_workers=8, shuffle=False)
+        return DataLoader(self.train_dataset, batch_size=1, num_workers=3, shuffle=False)
 
     def test_dataloader(self):
-        return DataLoader(self.test_dataset, batch_size=1, num_workers=8, shuffle=False)
+        return DataLoader(self.test_dataset, batch_size=1, num_workers=3, shuffle=False)

@@ -16,10 +16,10 @@ python3 -m src.main  --base_dir '/home/aka225/scratch/outputs' \
                     --train_file_names_file_path '/home/aka225/scratch/data/CelebAMask-HQ/CelebAMask-HQ/non_test_file_names.txt' \
                     --val_file_names_file_path '/home/aka225/scratch/data/CelebAMask-HQ/CelebAMask-HQ/non_test_file_names.txt' \
                     --optimizer 'Adam' \
-                    --epochs 40 \
+                    --epochs 50 \
                     --self_attention_loss_coef 1 \
                     --lr 0.1 \
-                    --crop_margin 10 \
+                    --crop_margin 40 \
                     --mask_size 128 \
                     --crop_threshold 0.2 \
                     --val_data_ids 200 201 202 203 204 205 206 207 208 209 \

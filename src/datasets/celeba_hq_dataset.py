@@ -143,7 +143,7 @@ class CelebaHQDataset(Dataset):
             while not mask_is_included:
                 result = self.train_transform(image=np.array(image), mask=final_mask)
                 # mask = torch.as_tensor(result["mask"])
-                if np.where(result["mask"] > 0, 1, 0).sum() > 20:
+                if np.where(result["mask"] > 0, 1, 0).sum() > 2000:
                     mask_is_included = True
 
             image = result["image"]
