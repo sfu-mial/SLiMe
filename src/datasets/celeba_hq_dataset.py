@@ -41,6 +41,10 @@ class CelebaHQDataset(Dataset):
         self.train = train
         self.mask_size = mask_size
         self.data_ids = data_ids
+        self.return_whole = False
+        if self.parts_to_return[1] == 'whole':
+            self.parts_to_return = ['background','brow','cloth','ear','eye','hair','mouth','neck','nose','skin']
+            self.return_whole = True
         mapping_dict = {}
         with open(idx_mapping_file) as file:
             mappings = file.readlines()[1:]
@@ -136,7 +140,8 @@ class CelebaHQDataset(Dataset):
                     aux_mask = np.where(aux_mask > 0, 1, 0)
             if not isinstance(aux_mask, int):
                 final_mask = np.where(aux_mask > 0, idx, final_mask)
-
+        if self.return_whole:
+            final_mask = np.where(final_mask>0, 1, 0)
         if self.train:
             image = transforms.functional.resize(image, 512)  # because the original image size is 1024 but the mask is 512
             mask_is_included = False

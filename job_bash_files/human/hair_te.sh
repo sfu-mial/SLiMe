@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --gres=gpu:a100:1       # Request GPU "generic resources"
 #SBATCH --cpus-per-task=3  # Refer to clusters documentation for the right CPU/GPU ratio
-#SBATCH --mem=8000M       # Memory proportional to GPUs: 32000 Cedar, 47000 Béluga, 64000 Graham.
-#SBATCH --time=0-00:20:00     # DD-HH:MM:SS
+#SBATCH --mem=16000M       # Memory proportional to GPUs: 32000 Cedar, 47000 Béluga, 64000 Graham.
+#SBATCH --time=0-00:15:00     # DD-HH:MM:SS
 
 module load python/3.6 cuda cudnn
 
@@ -33,4 +33,5 @@ python3 -m src.main --base_dir $OUTPUTDIR \
                     --mask_size 128 \
                     --crop_threshold 0.2 \
                     --val_data_ids 200 201 202 203 204 205 206 207 208 209 \
-                    --train_data_ids 1 5 7 8 9 12 13 22 31 34 \
+                    --train_data_ids 13 \
+                    # --train_data_ids 1 5 7 8 9 12 13 22 31 34 \

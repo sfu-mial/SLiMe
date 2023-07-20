@@ -136,6 +136,13 @@ class PascalVOCPartDataset(Dataset):
         self.counter = 0
         self.data = []
         self.part_names_to_return = part_names_to_return
+        self.return_whole = False
+        if self.part_names_to_return[1] == 'whole':
+            if object_name_to_return == 'car':
+                self.part_names_to_return = ['background','body','light','plate','wheel','window']
+            elif object_name_to_return == 'horse':
+                self.part_names_to_return = ['background','head', 'neck+torso', 'leg', 'tial']
+            self.return_whole = True
         self.current_idx = None
         self.final_min_crop_size = final_min_crop_size
         self.single_object = single_object
@@ -374,13 +381,14 @@ class PascalVOCPartDataset(Dataset):
 
         image = image.crop(bbox)
         mask = mask[bbox[1]:bbox[3], bbox[0]:bbox[2]]
-
+        if self.return_whole:
+            mask = np.where(mask > 0, 1, 0)
         if self.train:
             mask_is_included = False
             while not mask_is_included:
                 result = self.train_transform(image=np.array(image), mask=mask)
                 # mask = torch.as_tensor(result["mask"])
-                if np.where(result["mask"] > 0, 1, 0).sum() > 2000:
+                if np.where(result["mask"] > 0, 1, 0).sum() > 1000:
                     mask_is_included = True
             image = result["image"]
             mask = torch.as_tensor(result["mask"])
@@ -437,31 +445,22 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
 
     def setup(self, stage: str):
         if stage == "fit":
-            if self.object_name == 'car':
-                self.train_dataset = PascalVOCPartDataset(
-                    data_file_ids_file=self.train_data_file_ids_file,
-                    object_name_to_return=self.object_name,
-                    part_names_to_return=self.part_names,
-                    object_size_thresh=object_size_thresh[self.object_name],
-                    train=True,
-                    train_data_ids=self.train_data_ids,
-                    mask_size=self.mask_size,
-                    remove_overlapping_objects=self.remove_overlapping_objects,
-                    object_overlapping_threshold=self.object_overlapping_threshold,
-                    blur_background=self.blur_background,
-                    fill_background_with_black=self.fill_background_with_black,
-                    final_min_crop_size=self.final_min_crop_size,
-                    single_object=self.single_object,
-                    adjust_bounding_box=self.adjust_bounding_box,
-                )
-            if self.object_name == 'horse':
-                self.train_dataset = PaperTestSampleDataset(
-                    '/home/aka225/scratch/data/GAN_Training_image/horse_img',
-                    '/home/aka225/scratch/data/GAN_Training_image/horse_mask',
-                    train=True,
-                    part_name=self.part_names[1],
-                    object_name=self.object_name,
-                )
+            self.train_dataset = PascalVOCPartDataset(
+                data_file_ids_file=self.train_data_file_ids_file,
+                object_name_to_return=self.object_name,
+                part_names_to_return=self.part_names,
+                object_size_thresh=object_size_thresh[self.object_name],
+                train=True,
+                train_data_ids=self.train_data_ids,
+                mask_size=self.mask_size,
+                remove_overlapping_objects=self.remove_overlapping_objects,
+                object_overlapping_threshold=self.object_overlapping_threshold,
+                blur_background=self.blur_background,
+                fill_background_with_black=self.fill_background_with_black,
+                final_min_crop_size=self.final_min_crop_size,
+                single_object=self.single_object,
+                adjust_bounding_box=self.adjust_bounding_box,
+            )
             self.val_dataset = PascalVOCPartDataset(
                 data_file_ids_file=self.train_data_file_ids_file,
                 object_name_to_return=self.object_name,
@@ -494,11 +493,15 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
                     zero_pad_test_output=self.zero_pad_test_output,
                 )
             elif self.object_name == 'car':
+                if self.fill_background_with_black:
+                    image_dir = '/home/aka225/scratch/data/Car_TestSet/image_no_bg'
+                else:
+                    image_dir = '/home/aka225/scratch/data/Car_TestSet/image_bg'
                 self.test_dataset = PaperTestSampleDataset(
-                    '/home/aka225/scratch/data/Car_TestSet/image_no_bg',
+                    image_dir,
                     '/home/aka225/scratch/data/Car_TestSet/gt_mask',
                     train=False,
-                    part_name=self.part_names[1],
+                    part_name=self.part_names[-1],
                     object_name=self.object_name,
                 )
 

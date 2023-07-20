@@ -2,14 +2,14 @@
 #SBATCH --gres=gpu:a100:1       # Request GPU "generic resources"
 #SBATCH --cpus-per-task=3  # Refer to clusters documentation for the right CPU/GPU ratio
 #SBATCH --mem=16000M       # Memory proportional to GPUs: 32000 Cedar, 47000 Béluga, 64000 Graham.
-#SBATCH --time=0-00:30:00     # DD-HH:MM:SS
+#SBATCH --time=0-00:15:00     # DD-HH:MM:SS
 
 module load python/3.6 cuda cudnn
 
 OUTPUTDIR=/home/aka225/scratch/outputs
 DATADIR=/home/aka225/scratch/data
-OBJECTNAME=car
-PARTNAME=body
+OBJECTNAME=horse
+PARTNAME=whole
 # Prepare virtualenv
 source /home/aka225/cps_env/bin/activate
 # You could also create your environment here, on the local storage ($SLURM_TMPDIR), for better performance. See our docs on virtual environments.
@@ -33,7 +33,6 @@ python3 -m src.main --base_dir $OUTPUTDIR \
                     --lr 0.1 \
                     --mask_size 128 \
                     --crop_threshold 0.2 \
-                    --val_data_ids 43 45 46 47 48 49 51 54 55 56 \
-                    --train_data_ids 34 \
-                    # --train_data_ids 1 7 8 10 18 21 24 29 30 34 \
-                    # --fill_background_with_black
+                    --val_data_ids 28 29 30 31 33 35 39 40 41 43 \
+                    --train_data_ids 2 \
+                    # --train_data_ids 0 1 2 3 4 5 6 8 10 11 \

@@ -71,7 +71,8 @@ class PaperTestSampleDataset(Dataset):
         mask = np.array(mask)
 
         # only for horse
-        # mask = np.where(mask > np.array([200, 200, 200])[None, None, ...], 1, 0)
+        if self.object_name == "horse":
+            mask = np.where(mask > np.array([200, 200, 200])[None, None, ...], 255, 0)
 
         # # Zero Padding
         # c, h, w = mask.shape
@@ -96,7 +97,10 @@ class PaperTestSampleDataset(Dataset):
             part_mapping = car_part_color_mappings
         else:
             part_mapping = horse_part_color_mappings
-        final_mask = np.where(np.all(mask == np.array(part_mapping[self.part_name])[None, None, ...], 2), 1, 0)
+        if self.part_name == 'whole':
+            final_mask = np.where(np.sum(mask, axis=2) > 0, 1, 0)
+        else:
+            final_mask = np.where(np.all(mask == np.array(part_mapping[self.part_name])[None, None, ...], 2), 1, 0)
         # final_mask = transforms.functional.resize(final_mask, size=512, interpolation=transforms.InterpolationMode.NEAREST)
 
         if self.train:
@@ -138,7 +142,7 @@ class PaperTestSampleDataset(Dataset):
 class PaperTestSampleDataModule(pl.LightningDataModule):
     def __init__(
             self,
-            oajbect_name: str = 'car',
+            object_name: str = 'car',
             part_name: str = "body",
             images_dir: str = "./data",
             masks_dir: str = "./data",
@@ -146,7 +150,7 @@ class PaperTestSampleDataModule(pl.LightningDataModule):
             zero_pad_test_output: bool = False,
     ):
         super().__init__()
-        self.oajbect_name = oajbect_name
+        self.object_name = object_name
         self.part_name = part_name
         self.images_dir = images_dir
         self.masks_dir = masks_dir
