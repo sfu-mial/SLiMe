@@ -1,7 +1,7 @@
 from typing import Tuple
 
 import cv2
-
+import os
 from src.utils import adjust_bbox_coords, get_bbox_data
 import numpy as np
 import pytorch_lightning as pl
@@ -98,9 +98,9 @@ part_mapping = {
 }
 
 
-def get_file_dirs(annotation_file):
-    ann_file_path = f"/home/aka225/scratch/data/Annotations_Part/{annotation_file}"
-    img_file_path = f"/home/aka225/scratch/data/VOCdevkit/VOC2010/JPEGImages/{annotation_file.replace('mat', 'jpg')}"
+def get_file_dirs(annotation_file, ann_file_base_dir, images_base_dir):
+    ann_file_path = os.path.join(ann_file_base_dir, annotation_file)
+    img_file_path = os.path.join(images_base_dir, annotation_file.replace('mat', 'jpg'))
 
     return ann_file_path, img_file_path
 
@@ -111,6 +111,8 @@ object_size_thresh={"car": 50 * 50, "horse": 32 * 32, "dog": 32 * 32}
 class PascalVOCPartDataset(Dataset):
     def __init__(
             self,
+            ann_file_base_dir,
+            images_base_dir,
             data_file_ids_file,
             object_name_to_return,
             part_names_to_return,
@@ -128,6 +130,8 @@ class PascalVOCPartDataset(Dataset):
             zero_pad_test_output=False
     ):
         super().__init__()
+        self.ann_file_base_dir = ann_file_base_dir
+        self.images_base_dir = images_base_dir
         self.train = train
         self.train_data_ids = train_data_ids
         self.mask_size = mask_size
@@ -156,7 +160,7 @@ class PascalVOCPartDataset(Dataset):
             ann_file_id, is_class_data = line.strip().split()
             if is_class_data == "-1":
                 continue
-            ann_file_path, img_file_path = get_file_dirs(f"{ann_file_id}.mat")
+            ann_file_path, img_file_path = get_file_dirs(f"{ann_file_id}.mat", ann_file_base_dir=ann_file_base_dir, images_base_dir=images_base_dir)
             anns = io.loadmat(ann_file_path)['anno'][0, 0][1]
             num_objects = anns.shape[1]
             object_ids_to_remove = []
@@ -312,7 +316,7 @@ class PascalVOCPartDataset(Dataset):
                 #               mask_value=0),
                 A.HorizontalFlip(),
                 # A.RandomScale((0.5, 2), always_apply=True),
-                A.RandomResizedCrop(512, 512, (0.2, 1)),
+                A.RandomResizedCrop(512, 512, (0.8, 1)),
                 A.Rotate((-10, 10), border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0),
                 ToTensorV2()
             ])
@@ -328,7 +332,7 @@ class PascalVOCPartDataset(Dataset):
             file_name, object_id, part_data, bbox = data["file_name"], data["object_id"], data["part_data"], data["bbox"]
         else:
             file_name, part_data, bbox = data["file_name"], data["part_data"], data["bbox"]
-        ann_file_path, img_file_path = get_file_dirs(file_name)
+        ann_file_path, img_file_path = get_file_dirs(file_name, ann_file_base_dir=self.ann_file_base_dir, images_base_dir=self.images_base_dir)
         image = Image.open(img_file_path)
         data = io.loadmat(ann_file_path)
         anns = data['anno'][0, 0][1]
@@ -408,6 +412,9 @@ class PascalVOCPartDataset(Dataset):
 class PascalVOCPartDataModule(pl.LightningDataModule):
     def __init__(
             self,
+            ann_file_base_dir: str,
+            images_base_dir: str,
+            car_test_data_dir: str,
             train_data_file_ids_file: str = "./data",
             val_data_file_ids_file: str = "./data",
             object_name: str = "car",
@@ -426,6 +433,9 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
             zero_pad_test_output: bool = False
     ):
         super().__init__()
+        self.ann_file_base_dir = ann_file_base_dir
+        self.images_base_dir = images_base_dir
+        self.car_test_data_dir = car_test_data_dir
         self.train_data_file_ids_file = train_data_file_ids_file
         self.val_data_file_ids_file = val_data_file_ids_file
         self.object_name = object_name
@@ -446,6 +456,8 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
     def setup(self, stage: str):
         if stage == "fit":
             self.train_dataset = PascalVOCPartDataset(
+                ann_file_base_dir=self.ann_file_base_dir,
+                images_base_dir=self.images_base_dir,
                 data_file_ids_file=self.train_data_file_ids_file,
                 object_name_to_return=self.object_name,
                 part_names_to_return=self.part_names,
@@ -462,6 +474,8 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
                 adjust_bounding_box=self.adjust_bounding_box,
             )
             self.val_dataset = PascalVOCPartDataset(
+                ann_file_base_dir=self.ann_file_base_dir,
+                images_base_dir=self.images_base_dir,
                 data_file_ids_file=self.train_data_file_ids_file,
                 object_name_to_return=self.object_name,
                 part_names_to_return=self.part_names,
@@ -479,6 +493,8 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
         elif stage == "test":
             if self.object_name == 'horse':
                 self.test_dataset = PascalVOCPartDataset(
+                    ann_file_base_dir=self.ann_file_base_dir,
+                    images_base_dir=self.images_base_dir,
                     data_file_ids_file=self.val_data_file_ids_file,
                     object_name_to_return=self.object_name,
                     part_names_to_return=self.part_names,
@@ -494,14 +510,14 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
                 )
             elif self.object_name == 'car':
                 if self.fill_background_with_black:
-                    image_dir = '/home/aka225/scratch/data/Car_TestSet/image_no_bg'
+                    image_dir = os.path.join(self.car_test_data_dir, 'image_no_bg')
                 else:
-                    image_dir = '/home/aka225/scratch/data/Car_TestSet/image_bg'
+                    image_dir = os.path.join(self.car_test_data_dir, 'image_bg')
                 self.test_dataset = PaperTestSampleDataset(
                     image_dir,
-                    '/home/aka225/scratch/data/Car_TestSet/gt_mask',
+                    os.path.join(self.car_test_data_dir, 'gt_mask'),
                     train=False,
-                    part_name=self.part_names[-1],
+                    part_names=self.part_names[1:],
                     object_name=self.object_name,
                 )
 
@@ -510,7 +526,7 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
 
 
     def val_dataloader(self):
-        return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=1, shuffle=False)
+        return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=8, shuffle=False)
 
     def test_dataloader(self):
-        return DataLoader(self.test_dataset, batch_size=self.batch_size, num_workers=1, shuffle=False)
+        return DataLoader(self.test_dataset, batch_size=self.batch_size, num_workers=8, shuffle=False)

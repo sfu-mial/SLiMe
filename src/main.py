@@ -27,6 +27,9 @@ def main():
         )
     elif config.dataset == "pascal":
         dm = PascalVOCPartDataModule(
+            ann_file_base_dir=config.ann_file_base_dir,
+            images_base_dir=config.images_base_dir,
+            car_test_data_dir=config.car_test_data_dir,
             train_data_file_ids_file=config.train_data_file_ids_file,
             val_data_file_ids_file=config.val_data_file_ids_file,
             object_name=config.object_name,

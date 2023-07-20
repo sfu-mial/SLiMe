@@ -1,5 +1,5 @@
 import os
-
+from typing import Tuple
 import pytorch_lightning as pl
 import torch
 from PIL import Image
@@ -28,13 +28,13 @@ horse_part_color_mappings = {
 
 
 class PaperTestSampleDataset(Dataset):
-    def __init__(self, images_dir, masks_dir, train=True, mask_size=128, zero_pad_test_output=False, object_name='car', part_name='body'):
+    def __init__(self, images_dir, masks_dir, train=True, mask_size=128, zero_pad_test_output=False, object_name='car', part_names=('background', 'body', )):
         self.image_dirs = sorted(glob(os.path.join(images_dir, "*")))
         self.mask_dirs = sorted(glob(os.path.join(masks_dir, "*")))
         self.train = train
         self.mask_size = mask_size
         self.object_name = object_name
-        self.part_name = part_name
+        self.part_names = part_names
         self.train_transform = A.Compose([
             A.LongestMaxSize(512),
             A.PadIfNeeded(512, 512, border_mode=cv2.BORDER_CONSTANT, value=0,
@@ -97,10 +97,12 @@ class PaperTestSampleDataset(Dataset):
             part_mapping = car_part_color_mappings
         else:
             part_mapping = horse_part_color_mappings
-        if self.part_name == 'whole':
+        if self.part_names == ['whole']:
             final_mask = np.where(np.sum(mask, axis=2) > 0, 1, 0)
         else:
-            final_mask = np.where(np.all(mask == np.array(part_mapping[self.part_name])[None, None, ...], 2), 1, 0)
+            final_mask = np.zeros_like(mask[:, :, 0])
+            for idx, part_name in enumerate(self.part_names):
+                final_mask = np.where(np.all(mask == np.array(part_mapping[part_name])[None, None, ...], 2), idx+1, final_mask)
         # final_mask = transforms.functional.resize(final_mask, size=512, interpolation=transforms.InterpolationMode.NEAREST)
 
         if self.train:
@@ -143,7 +145,7 @@ class PaperTestSampleDataModule(pl.LightningDataModule):
     def __init__(
             self,
             object_name: str = 'car',
-            part_name: str = "body",
+            part_names: Tuple[str] = ("body", ),
             images_dir: str = "./data",
             masks_dir: str = "./data",
             mask_size: int = 128,
@@ -151,7 +153,7 @@ class PaperTestSampleDataModule(pl.LightningDataModule):
     ):
         super().__init__()
         self.object_name = object_name
-        self.part_name = part_name
+        self.part_names = part_names
         self.images_dir = images_dir
         self.masks_dir = masks_dir
         self.mask_size = mask_size
@@ -164,7 +166,7 @@ class PaperTestSampleDataModule(pl.LightningDataModule):
                 masks_dir=self.masks_dir,
                 train=True,
                 mask_size=self.mask_size,
-                part_name=self.part_name,
+                part_names=self.part_names,
                 object_name=self.object_name,
             )
         if stage == 'test':
@@ -173,7 +175,7 @@ class PaperTestSampleDataModule(pl.LightningDataModule):
                 masks_dir=self.masks_dir,
                 train=False,
                 zero_pad_test_output=self.zero_pad_test_output,
-                part_name=self.part_name,
+                part_names=self.part_names,
                 object_name=self.object_name,
             )
 

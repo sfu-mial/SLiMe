@@ -66,6 +66,9 @@ def add_pascal_dataset_args(parser):
     parser.add_argument('--adjust_bounding_box', action='store_true', default=False)
     parser.add_argument('--final_min_crop_size', type=int)
     parser.add_argument('--object_overlapping_threshold', type=float)
+    parser.add_argument('--ann_file_base_dir', type=str)
+    parser.add_argument('--images_base_dir', type=str)
+    parser.add_argument('--car_test_data_dir', type=str)
     return parser
 
 def add_celeba_dataset_args(parser):
