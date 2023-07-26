@@ -6,6 +6,7 @@ from torch.utils.data import Dataset
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 import cv2
+import numpy as np
 
 class SampleDataset(Dataset):
     def __init__(self, image_dirs, mask_dirs, num_crops=1, train=True, mask_size=256, final_min_crop_size=256):
