@@ -9,13 +9,11 @@ import cv2
 import numpy as np
 
 class SampleDataset(Dataset):
-    def __init__(self, image_dirs, mask_dirs, num_crops=1, train=True, mask_size=256, final_min_crop_size=256):
+    def __init__(self, image_dirs, mask_dirs, train=True, mask_size=256):
         self.image_dirs = image_dirs
         self.mask_dirs = mask_dirs
-        self.num_crops = num_crops
         self.train = train
         self.mask_size = mask_size
-        self.final_min_crop_size = final_min_crop_size
         self.train_transform = A.Compose([
             A.Resize(512, 512),
             # A.LongestMaxSize(512),
@@ -114,7 +112,6 @@ class SampleDataModule(pl.LightningDataModule):
             src_image_dirs: str = "./data",
             target_image_dir: str = "./data",
             src_mask_dirs: str = "./data",
-            train_num_crops: int = 1,
             batch_size: int = 1,
             mask_size: int = 256
     ):
@@ -122,7 +119,6 @@ class SampleDataModule(pl.LightningDataModule):
         self.src_image_dirs = src_image_dirs
         self.target_image_dir = target_image_dir
         self.src_mask_dirs = src_mask_dirs
-        self.train_num_crops = train_num_crops
         self.batch_size = batch_size
         self.mask_size = mask_size
 
