@@ -79,6 +79,7 @@ def main():
         default_root_dir=config.base_dir,
         max_epochs=config.epochs,
         devices=gpu_id,
+        accumulate_grad_batches=4,
         # precision=16,
         # logger=wandb_logger,
         log_every_n_steps=1,

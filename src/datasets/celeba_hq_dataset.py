@@ -107,7 +107,8 @@ class CelebaHQDataset(Dataset):
                 A.Resize(512, 512),
                 A.HorizontalFlip(),
                 # A.RandomScale((0.5, 2), always_apply=True),
-                A.RandomResizedCrop(512, 512, (0.8, 1)),
+                A.GaussianBlur(blur_limit=(11, 31)),
+                A.RandomResizedCrop(512, 512, (0.3, 1)),
                 A.Rotate((-10, 10), border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0),
                 ToTensorV2()
             ])
@@ -144,13 +145,14 @@ class CelebaHQDataset(Dataset):
             final_mask = np.where(final_mask>0, 1, 0)
         if self.train:
             image = transforms.functional.resize(image, 512)  # because the original image size is 1024 but the mask is 512
+            original_mask_size = np.where(final_mask > 0, 1, 0).sum()
             mask_is_included = False
             while not mask_is_included:
                 result = self.train_transform(image=np.array(image), mask=final_mask)
                 # mask = torch.as_tensor(result["mask"])
-                if np.where(result["mask"] > 0, 1, 0).sum() > 2000:
+                if np.where(result["mask"] > 0, 1, 0).sum() / original_mask_size > 0.3:
                     mask_is_included = True
-
+                    
             image = result["image"]
             mask = torch.as_tensor(result["mask"])
             # result = self.train_transform(image=np.array(image), mask=final_mask)

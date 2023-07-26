@@ -28,11 +28,11 @@ def add_base_args(parser):
                                                                             'up_blocks[2].attentions[1].transformer_blocks[0].attn2',  # +
                                                                             # 'up_blocks[2].attentions[2].transformer_blocks[0].attn1',
                                                                             # 'up_blocks[2].attentions[2].transformer_blocks[0].attn2',
-                                                                            # 'up_blocks[3].attentions[0].transformer_blocks[0].attn1',
+                                                                            'up_blocks[3].attentions[0].transformer_blocks[0].attn1',
                                                                             # 'up_blocks[3].attentions[0].transformer_blocks[0].attn2',
                                                                             'up_blocks[3].attentions[1].transformer_blocks[0].attn1',  #############3
                                                                             # 'up_blocks[3].attentions[1].transformer_blocks[0].attn2',
-                                                                            # 'up_blocks[3].attentions[2].transformer_blocks[0].attn1',
+                                                                            'up_blocks[3].attentions[2].transformer_blocks[0].attn1',
                                                                             # 'up_blocks[3].attentions[2].transformer_blocks[0].attn2',
                                                                             # 'mid_block.attentions[0].transformer_blocks[0].attn1',
                                                                             # 'mid_block.attentions[0].transformer_blocks[0].attn2'
@@ -68,7 +68,7 @@ def add_pascal_dataset_args(parser):
     parser.add_argument('--object_overlapping_threshold', type=float)
     parser.add_argument('--ann_file_base_dir', type=str)
     parser.add_argument('--images_base_dir', type=str)
-    parser.add_argument('--car_test_data_dir', type=str)
+    parser.add_argument('--car_test_data_dir', type=str, default='/home/aka225/scratch/data/Car_TestSet')
     return parser
 
 def add_celeba_dataset_args(parser):

@@ -201,7 +201,7 @@ class StableDiffusion(nn.Module):
                 sd_cross_attention_maps = torch.stack(list(cross_attention_maps.values()), dim=1).to(
                     self.device)
         if len(self_attention_maps.values()) > 0:
-            sd_self_attention_maps = list(map(lambda x: x.to(self.device), list(self_attention_maps.values())))
+            sd_self_attention_maps = torch.stack(list(self_attention_maps.values()), dim=0).mean(dim=0)
 
         if len(resnets.values()) > 0:
             r = list(map(lambda x: x.to(self.device), list(resnets.values())))

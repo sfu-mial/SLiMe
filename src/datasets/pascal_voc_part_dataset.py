@@ -119,7 +119,7 @@ class PascalVOCPartDataset(Dataset):
             object_size_thresh=50*50,
             train=True,
             train_data_ids=(0,),
-            mask_size=256,
+            mask_size=512,
             remove_overlapping_objects=False,
             object_overlapping_threshold=0.05,
             blur_background=False,
@@ -316,7 +316,8 @@ class PascalVOCPartDataset(Dataset):
                 #               mask_value=0),
                 A.HorizontalFlip(),
                 # A.RandomScale((0.5, 2), always_apply=True),
-                A.RandomResizedCrop(512, 512, (0.8, 1)),
+                A.GaussianBlur(blur_limit=(11, 31)),
+                A.RandomResizedCrop(512, 512, (0.4, 1)),
                 A.Rotate((-10, 10), border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0),
                 ToTensorV2()
             ])
@@ -389,10 +390,11 @@ class PascalVOCPartDataset(Dataset):
             mask = np.where(mask > 0, 1, 0)
         if self.train:
             mask_is_included = False
+            original_mask_size = np.where(mask > 0, 1, 0).sum()
             while not mask_is_included:
                 result = self.train_transform(image=np.array(image), mask=mask)
                 # mask = torch.as_tensor(result["mask"])
-                if np.where(result["mask"] > 0, 1, 0).sum() > 1000:
+                if np.where(result["mask"] > 0, 1, 0).sum() / original_mask_size > 0.3:
                     mask_is_included = True
             image = result["image"]
             mask = torch.as_tensor(result["mask"])
