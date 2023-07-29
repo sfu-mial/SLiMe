@@ -27,10 +27,31 @@ part_names_mapping = {
     "neck": "neck",
     "cloth": "cloth",
     "hair": "hair",
+}
 
+part_names_mapping_1 = {
+    "r_eye": "r_eye",
+    "l_eye": "l_eye",
+    "mouth": "mouth",
+    "nose": "nose",
+    "r_brow": "r_brow",
+    "l_brow": "l_brow",
+    "r_ear": "r_ear",
+    "l_ear": "l_ear",
+    "ear_r": "ear_r",
+    "u_lip": "u_lip",
+    "l_lip": "l_lip",
+    "skin": "skin",
+    "neck": "neck",
+    "cloth": "cloth",
+    "hair": "hair",
+    "hat": "hat",
+    "neck_l": "neck_l",
+    "eye_g": "eye_g",
 }
 
 non_skin_part_names = ["eye", "mouth", "nose", "brow", "ear"]
+non_skin_part_names_1 = ["r_eye", "l_eye", "mouth", "nose", "r_brow", "l_brow", "r_ear", "l_ear", "ear_r", "u_lip", "l_lip", "neck", "cloth", "hair", "hat", "neck_l", "eye_g"]
 
 
 class CelebaHQDataset(Dataset):
@@ -54,9 +75,12 @@ class CelebaHQDataset(Dataset):
         with open(file_names_file_path) as file:
             files_names = file.readlines()
         if data_ids is not None:
-            files_names = files_names[min(self.data_ids):max(self.data_ids) + 1]
-        for file_name in tqdm(files_names):
-            file_name = file_name.strip()
+            files_ids = data_ids
+        else:
+            files_ids = list(range(len(files_names)))
+            # files_names = files_names[min(self.data_ids):max(self.data_ids) + 1]
+        for file_id in tqdm(files_ids):
+            file_name = files_names[file_id].strip()
             file_name = mapping_dict[file_name]
             self.images_paths.append(os.path.join(images_dir, f"{file_name}.jpg"))
             file_index = int(file_name.split(".")[0])
@@ -64,26 +88,26 @@ class CelebaHQDataset(Dataset):
             masks_paths = glob(os.path.join(masks_dir, str(mask_folder_idx), f"{file_name.zfill(5)}_*.png"))
             part_data_paths = {}
             for path in masks_paths:
-                part_name = re.findall("\.*_([a-z|A-Z]+).png", path)[0]
-                if part_names_mapping.get(part_name, False):
-                    part_name = part_names_mapping[part_name]
+                part_name = re.findall("\.*_([a-z]?_?[a-z]+).png", path)[0]
+                if part_names_mapping_1.get(part_name, False):
+                    part_name = part_names_mapping_1[part_name]
                     part_paths = part_data_paths.get(part_name, [])
                     part_paths.append(path)
                     part_data_paths[part_name] = part_paths
-                    if part_name in non_skin_part_names:
+                    if part_name in non_skin_part_names_1:
                         part_paths = part_data_paths.get("non_skin", [])
                         part_paths.append(path)
                         part_data_paths["non_skin"] = part_paths
 
             self.masks_paths.append(part_data_paths)
-        if data_ids is not None:
-            aux_images_paths = []
-            aux_masks_paths = []
-            for id in data_ids:
-                aux_images_paths.append(self.images_paths[id-min(self.data_ids)])
-                aux_masks_paths.append(self.masks_paths[id-min(self.data_ids)])
-            self.images_paths = aux_images_paths
-            self.masks_paths = aux_masks_paths
+        # if data_ids is not None:
+        #     aux_images_paths = []
+        #     aux_masks_paths = []
+        #     for id in data_ids:
+        #         aux_images_paths.append(self.images_paths[id-min(self.data_ids)])
+        #         aux_masks_paths.append(self.masks_paths[id-min(self.data_ids)])
+        #     self.images_paths = aux_images_paths
+        #     self.masks_paths = aux_masks_paths
 
         if zero_pad_test_output:
             self.train_transform = A.Compose([
@@ -107,7 +131,7 @@ class CelebaHQDataset(Dataset):
                 A.Resize(512, 512),
                 A.HorizontalFlip(),
                 # A.RandomScale((0.5, 2), always_apply=True),
-                A.GaussianBlur(blur_limit=(11, 31)),
+                A.GaussianBlur(blur_limit=(1, 31)),
                 A.RandomResizedCrop(512, 512, (0.3, 1)),
                 A.Rotate((-10, 10), border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0),
                 ToTensorV2()
