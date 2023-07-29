@@ -124,52 +124,84 @@ class CoSegmenterTrainer(pl.LightningModule):
 
         final_attention_map = torch.zeros(len(self.config.part_names), image.shape[2], image.shape[3])
         aux_attention_map = torch.zeros(len(self.config.part_names), image.shape[2], image.shape[3], dtype=torch.uint8) + 1e-7
-
-        for i in range(num_crops_per_side):
-            for j in range(num_crops_per_side):
-                y_start, y_end, x_start, x_end = crops_coords[i * num_crops_per_side + j]
-                cropped_image = image[:, :, y_start:y_end, x_start:x_end]
-                with torch.no_grad():
-                    loss, _, sd_cross_attention_maps2, sd_self_attention_maps = self.stable_diffusion.train_step(
-                        self.test_t_embedding, cropped_image,
-                        t=torch.tensor(20), back_propagate_loss=False, generate_new_noise=False,
-                        attention_output_size=64,
-                        token_ids=list(range(len(self.config.part_names))), train=False)
-                self_attention_map = \
+        for crop_coord in crops_coords:
+            y_start, y_end, x_start, x_end = crop_coord
+            cropped_image = image[:, :, y_start:y_end, x_start:x_end]
+            with torch.no_grad():
+                _, _, sd_cross_attention_maps2, sd_self_attention_maps = self.stable_diffusion.train_step(
+                    self.test_t_embedding, cropped_image,
+                    t=torch.tensor(20), back_propagate_loss=False, generate_new_noise=False,
+                    attention_output_size=64,
+                    token_ids=list(range(len(self.config.part_names))), train=False)
+            self_attention_map = \
                     torch.nn.functional.interpolate(sd_self_attention_maps[None, ...],
                                                     crop_size, mode="bicubic")[0].detach()
+            
+            attention_maps = sd_cross_attention_maps2.flatten(1, 2).detach()  # len(self.config.checkpoint_dir) , 64x64
+            max_values = attention_maps.max(dim=1).values  # len(self.config.checkpoint_dir)
+            min_values = attention_maps.min(dim=1).values  # len(self.config.checkpoint_dir)
+            passed_indices = torch.where(max_values >= threshold)[0]  #
+            if len(passed_indices) > 0:
+                passed_attention_maps = attention_maps[passed_indices]
+                for idx, mask_id in enumerate(passed_indices):
+                    avg_self_attention_map = (
+                            passed_attention_maps[idx][..., None, None] *
+                            self_attention_map).mean(dim=0)
+                    avg_self_attention_map_min = avg_self_attention_map.min()
+                    avg_self_attention_map_max = avg_self_attention_map.max()
+                    coef = (avg_self_attention_map_max - avg_self_attention_map_min) / (
+                            max_values[mask_id] - min_values[mask_id])
+                    final_attention_map[mask_id, y_start:y_end, x_start:x_end] += (
+                            (avg_self_attention_map / coef) + (
+                            min_values[mask_id] - avg_self_attention_map_min / coef)).cpu()
+                    aux_attention_map[mask_id, y_start:y_end, x_start:x_end] += (torch.ones_like(avg_self_attention_map, dtype=torch.uint8)).cpu()
 
-                # self_attention_map : 64x64, 64, 64
-                # sd_cross_attention_maps2 : len(self.config.checkpoint_dir), 64, 64
 
-                attention_maps = sd_cross_attention_maps2.flatten(1, 2).detach()  # len(self.config.checkpoint_dir) , 64x64
-                max_values = attention_maps.max(dim=1).values  # len(self.config.checkpoint_dir)
-                min_values = attention_maps.min(dim=1).values  # len(self.config.checkpoint_dir)
-                passed_indices = torch.where(max_values >= threshold)[0]  #
-                if len(passed_indices) > 0:
-                    passed_attention_maps = attention_maps[passed_indices]
-                    # passed_masks = torch.where(passed_attention_maps > passed_attention_maps.mean(1, keepdim=True) + passed_attention_maps.std(1, keepdim=True), 1, 0)
-                    # zero_masks_indices = torch.all(passed_masks == 0, dim=1)
-                    # if zero_masks_indices.sum() > 0:  # there is at least one mask with all values equal to zero
-                    #     passed_masks[zero_masks_indices] = torch.where(
-                    #         passed_attention_maps[zero_masks_indices] > passed_attention_maps.mean(1, keepdim=True)[zero_masks_indices], 1, 0)
-                    for idx, mask_id in enumerate(passed_indices):
-                        avg_self_attention_map = (
-                                passed_attention_maps[idx][..., None, None] *
-                                self_attention_map).mean(dim=0)
-                        avg_self_attention_map_min = avg_self_attention_map.min()
-                        avg_self_attention_map_max = avg_self_attention_map.max()
-                        coef = (avg_self_attention_map_max - avg_self_attention_map_min) / (
-                                max_values[mask_id] - min_values[mask_id])
-                        final_attention_map[mask_id, y_start:y_end, x_start:x_end] += (
-                                (avg_self_attention_map / coef) + (
-                                min_values[mask_id] - avg_self_attention_map_min / coef)).cpu()
-                        # final_attention_map[mask_id, y_start:y_end, x_start:x_end] += (
-                        #         (avg_self_attention_map / coef) + (
-                        #             min_values[mask_id] - avg_self_attention_map_min / coef)).cpu()
-                        # final_attention_map[mask_id, y_start:y_end, x_start:x_end] += (
-                        #             avg_self_attention_map * max_values[mask_id])
-                        aux_attention_map[mask_id, y_start:y_end, x_start:x_end] += (torch.ones_like(avg_self_attention_map, dtype=torch.uint8)).cpu()
+        # for i in range(num_crops_per_side):
+        #     for j in range(num_crops_per_side):
+        #         y_start, y_end, x_start, x_end = crops_coords[i * num_crops_per_side + j]
+        #         cropped_image = image[:, :, y_start:y_end, x_start:x_end]
+        #         with torch.no_grad():
+        #             loss, _, sd_cross_attention_maps2, sd_self_attention_maps = self.stable_diffusion.train_step(
+        #                 self.test_t_embedding, cropped_image,
+        #                 t=torch.tensor(20), back_propagate_loss=False, generate_new_noise=False,
+        #                 attention_output_size=64,
+        #                 token_ids=list(range(len(self.config.part_names))), train=False)
+        #         self_attention_map = \
+        #             torch.nn.functional.interpolate(sd_self_attention_maps[None, ...],
+        #                                             crop_size, mode="bicubic")[0].detach()
+
+        #         # self_attention_map : 64x64, 64, 64
+        #         # sd_cross_attention_maps2 : len(self.config.checkpoint_dir), 64, 64
+
+        #         attention_maps = sd_cross_attention_maps2.flatten(1, 2).detach()  # len(self.config.checkpoint_dir) , 64x64
+        #         max_values = attention_maps.max(dim=1).values  # len(self.config.checkpoint_dir)
+        #         min_values = attention_maps.min(dim=1).values  # len(self.config.checkpoint_dir)
+        #         passed_indices = torch.where(max_values >= threshold)[0]  #
+        #         if len(passed_indices) > 0:
+        #             passed_attention_maps = attention_maps[passed_indices]
+        #             # passed_masks = torch.where(passed_attention_maps > passed_attention_maps.mean(1, keepdim=True) + passed_attention_maps.std(1, keepdim=True), 1, 0)
+        #             # zero_masks_indices = torch.all(passed_masks == 0, dim=1)
+        #             # if zero_masks_indices.sum() > 0:  # there is at least one mask with all values equal to zero
+        #             #     passed_masks[zero_masks_indices] = torch.where(
+        #             #         passed_attention_maps[zero_masks_indices] > passed_attention_maps.mean(1, keepdim=True)[zero_masks_indices], 1, 0)
+        #             for idx, mask_id in enumerate(passed_indices):
+        #                 avg_self_attention_map = (
+        #                         passed_attention_maps[idx][..., None, None] *
+        #                         self_attention_map).mean(dim=0)
+        #                 avg_self_attention_map_min = avg_self_attention_map.min()
+        #                 avg_self_attention_map_max = avg_self_attention_map.max()
+        #                 coef = (avg_self_attention_map_max - avg_self_attention_map_min) / (
+        #                         max_values[mask_id] - min_values[mask_id])
+        #                 final_attention_map[mask_id, y_start:y_end, x_start:x_end] += (
+        #                         (avg_self_attention_map / coef) + (
+        #                         min_values[mask_id] - avg_self_attention_map_min / coef)).cpu()
+        #                 # final_attention_map[mask_id, y_start:y_end, x_start:x_end] += (
+        #                 #         (avg_self_attention_map / coef) + (
+        #                 #             min_values[mask_id] - avg_self_attention_map_min / coef)).cpu()
+        #                 # final_attention_map[mask_id, y_start:y_end, x_start:x_end] += (
+        #                 #             avg_self_attention_map * max_values[mask_id])
+        #                 aux_attention_map[mask_id, y_start:y_end, x_start:x_end] += (torch.ones_like(avg_self_attention_map, dtype=torch.uint8)).cpu()
 
         final_attention_map /= aux_attention_map
         flattened_final_attention_map = final_attention_map.flatten(1, 2)
