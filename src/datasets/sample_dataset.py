@@ -35,7 +35,7 @@ class SampleDataset(Dataset):
     def __getitem__(self, idx):
         image = Image.open(self.image_dirs[idx])
         if self.train:
-            mask = Image.open(self.mask_dirs[idx])
+            mask = np.array(Image.open(self.mask_dirs[idx]))[:, :, 0] / 255
             mask_is_included = False
             original_mask_size = np.where(mask > 0, 1, 0).sum()
             while not mask_is_included:
@@ -50,7 +50,7 @@ class SampleDataset(Dataset):
             return image/255, mask
         else:
             if self.mask_dirs is not None:
-                mask = Image.open(self.mask_dirs[idx])
+                mask = np.array(Image.open(self.mask_dirs[idx]))[:, :, 0] / 255
                 result = self.test_transform(image=np.array(image), mask=mask)
                 mask = result['mask']
             else:
