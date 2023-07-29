@@ -96,7 +96,7 @@ def add_train_args(parser):
     return parser
 
 def add_test_args(parser):
-    parser.add_argument('--masking', type=str, default='zoomed_masking')
+    parser.add_argument('--masking', type=str, default='zoomed_masking', choices=['zoomed_masking', 'patched_masking'])
     parser.add_argument('--num_crops_per_side', type=int)
     parser.add_argument('--crop_size', type=int)
     parser.add_argument('--crop_margin', default=10, type=int)

@@ -21,7 +21,7 @@ class SampleDataset(Dataset):
             #               mask_value=0),
             A.HorizontalFlip(),
             # A.RandomScale((0.5, 2), always_apply=True),
-            A.GaussianBlur(blur_limit=(11, 31)),
+            A.GaussianBlur(blur_limit=(1, 31)),
             A.RandomResizedCrop(512, 512, (0.4, 1)),
             A.Rotate((-10, 10), border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0),
             ToTensorV2()
