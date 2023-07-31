@@ -1,4 +1,3 @@
-import random
 import pytorch_lightning as pl
 import torch
 from PIL import Image
@@ -9,7 +8,7 @@ import os
 from glob import glob
 import re
 from tqdm import tqdm
-from typing import List, Tuple
+from typing import List
 import cv2
 import numpy as np
 import albumentations as A
@@ -17,12 +16,16 @@ from albumentations.pytorch import ToTensorV2
 
 
 part_names_mapping = {
-    "eye": "eye",
+    "r_eye": "eye",
+    "l_eye": "eye",
     "mouth": "mouth",
     "nose": "nose",
-    "brow": "brow",
-    "ear": "ear",
-    "lip": "mouth",
+    "r_brow": "brow",
+    "l_brow": "brow",
+    "r_ear": "ear",
+    "l_ear": "ear",
+    "u_lip": "mouth",
+    "l_lip": "mouth",
     "skin": "skin",
     "neck": "neck",
     "cloth": "cloth",
@@ -50,7 +53,7 @@ part_names_mapping_1 = {
     "eye_g": "eye_g",
 }
 
-non_skin_part_names = ["eye", "mouth", "nose", "brow", "ear"]
+non_skin_part_names = ["eye", "mouth", "nose", "brow", "ear", "cloth", "hair", "neck"]
 non_skin_part_names_1 = ["r_eye", "l_eye", "mouth", "nose", "r_brow", "l_brow", "r_ear", "l_ear", "ear_r", "u_lip", "l_lip", "neck", "cloth", "hair", "hat", "neck_l", "eye_g"]
 
 
@@ -61,10 +64,9 @@ class CelebaHQDataset(Dataset):
         self.parts_to_return = parts_to_return
         self.train = train
         self.mask_size = mask_size
-        self.data_ids = data_ids
         self.return_whole = False
         if self.parts_to_return[1] == 'whole':
-            self.parts_to_return = ['background','brow','cloth','ear','eye','hair','mouth','neck','nose','skin']
+            self.parts_to_return = ['background'] + list(part_names_mapping.values())
             self.return_whole = True
         mapping_dict = {}
         with open(idx_mapping_file) as file:
@@ -74,40 +76,48 @@ class CelebaHQDataset(Dataset):
             mapping_dict[file_name] = idx
         with open(file_names_file_path) as file:
             files_names = file.readlines()
-        if data_ids is not None:
-            files_ids = data_ids
-        else:
-            files_ids = list(range(len(files_names)))
+        # if data_ids is not None:
+        #     files_ids = data_ids
+        # else:
+        #     files_ids = list(range(len(files_names)))
             # files_names = files_names[min(self.data_ids):max(self.data_ids) + 1]
-        for file_id in tqdm(files_ids):
-            file_name = files_names[file_id].strip()
+        for file_name in tqdm(files_names):
+            file_name = file_name.strip()
             file_name = mapping_dict[file_name]
-            self.images_paths.append(os.path.join(images_dir, f"{file_name}.jpg"))
             file_index = int(file_name.split(".")[0])
             mask_folder_idx = file_index // 2000
             masks_paths = glob(os.path.join(masks_dir, str(mask_folder_idx), f"{file_name.zfill(5)}_*.png"))
             part_data_paths = {}
             for path in masks_paths:
-                part_name = re.findall("\.*_([a-z]?_?[a-z]+).png", path)[0]
-                if part_names_mapping_1.get(part_name, False):
-                    part_name = part_names_mapping_1[part_name]
+                part_name = re.findall("\.*_([a-z]*_*[a-z]+).png", path)[0]
+                if part_names_mapping.get(part_name, False):
+                    part_name = part_names_mapping[part_name]
                     part_paths = part_data_paths.get(part_name, [])
                     part_paths.append(path)
                     part_data_paths[part_name] = part_paths
-                    if part_name in non_skin_part_names_1:
+                    if part_name in non_skin_part_names:
                         part_paths = part_data_paths.get("non_skin", [])
                         part_paths.append(path)
                         part_data_paths["non_skin"] = part_paths
-
-            self.masks_paths.append(part_data_paths)
-        # if data_ids is not None:
-        #     aux_images_paths = []
-        #     aux_masks_paths = []
-        #     for id in data_ids:
-        #         aux_images_paths.append(self.images_paths[id-min(self.data_ids)])
-        #         aux_masks_paths.append(self.masks_paths[id-min(self.data_ids)])
-        #     self.images_paths = aux_images_paths
-        #     self.masks_paths = aux_masks_paths
+            
+            data_sample_has_part = False
+            for part_name in self.parts_to_return[1:]:
+                if part_name in part_data_paths:
+                    data_sample_has_part = True
+                    break
+            if data_sample_has_part:
+                self.masks_paths.append(part_data_paths)
+                self.images_paths.append(os.path.join(images_dir, f"{file_name}.jpg"))
+            if data_ids is not None and len(self.images_paths) == max(data_ids)+1:
+                break
+        if data_ids is not None:
+            aux_images_paths = []
+            aux_masks_paths = []
+            for id in data_ids:
+                aux_images_paths.append(self.images_paths[id])
+                aux_masks_paths.append(self.masks_paths[id])
+            self.images_paths = aux_images_paths
+            self.masks_paths = aux_masks_paths
 
         if zero_pad_test_output:
             self.train_transform = A.Compose([
@@ -161,12 +171,12 @@ class CelebaHQDataset(Dataset):
                 if part_name in masks_paths:
                     for path in masks_paths[part_name]:
                         mask = np.array(Image.open(path))[:, :, 0] / 255
-                        aux_mask += mask
+                        aux_mask += np.where(mask>0, 1, 0)
                     aux_mask = np.where(aux_mask > 0, 1, 0)
             if not isinstance(aux_mask, int):
                 final_mask = np.where(aux_mask > 0, idx, final_mask)
         if self.return_whole:
-            final_mask = np.where(final_mask>0, 1, 0)
+            final_mask = np.where(final_mask>0, 1., 0.)
         if self.train:
             image = transforms.functional.resize(image, 512)  # because the original image size is 1024 but the mask is 512
             original_mask_size = np.where(final_mask > 0, 1, 0).sum()
@@ -189,7 +199,8 @@ class CelebaHQDataset(Dataset):
         image = transforms.functional.resize(image, 512)  # because the original image size is 1024 but the mask is 512
         result = self.test_transform(image=np.array(image), mask=final_mask)
         image = result["image"]
-        mask = torch.as_tensor(result["mask"])
+        mask = result["mask"]
+        # mask = torch.nn.functional.interpolate(torch.as_tensor(result["mask"])[None, None, ...], 256)[0, 0]
         return image / 255, mask
 
     def __len__(self):

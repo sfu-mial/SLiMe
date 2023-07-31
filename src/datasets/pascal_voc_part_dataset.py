@@ -317,7 +317,7 @@ class PascalVOCPartDataset(Dataset):
                 A.HorizontalFlip(),
                 # A.RandomScale((0.5, 2), always_apply=True),
                 A.GaussianBlur(blur_limit=(1, 31)),
-                A.Persepective(scale=(0.05, 0.1), pad_mode=cv2.BORDER_REPLICATE),
+                # A.Persepective(scale=(0.05, 0.1), pad_mode=cv2.BORDER_REPLICATE),
                 A.RandomResizedCrop(512, 512, (0.4, 1)),
                 A.Rotate((-10, 10), border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0),
                 ToTensorV2()

@@ -47,6 +47,7 @@ def add_base_args(parser):
     parser.add_argument('--part_names', nargs='+', type=str, required=True)
     parser.add_argument('--objective_to_optimize', type=str, default='text_embedding')
     parser.add_argument('--log_images', action='store_true', default=False)
+    parser.add_argument('--text_prompt', type=str, default='')
     return parser
     
 def add_sample_dataset_args(parser):
@@ -93,6 +94,7 @@ def add_train_args(parser):
     parser.add_argument('--mask_size', type=int, default=128)
     parser.add_argument('--val_data_ids', nargs='+', type=int)
     parser.add_argument('--train_data_ids', nargs='+', type=int)
+    parser.add_argument('--use_all_tokens_for_training', action='store_true', default=False)
     return parser
 
 def add_test_args(parser):
@@ -100,7 +102,7 @@ def add_test_args(parser):
     parser.add_argument('--num_crops_per_side', type=int)
     parser.add_argument('--crop_size', type=int)
     parser.add_argument('--crop_margin', default=10, type=int)
-    parser.add_argument('--min_square_size', default=200, type=int)
+    parser.add_argument('--min_square_size', default=100, type=int)
     parser.add_argument('--crop_threshold', type=float)
     parser.add_argument('--zero_pad_test_output', action='store_true', default=False)
     return parser

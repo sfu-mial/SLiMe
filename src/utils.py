@@ -16,12 +16,12 @@ def adjust_bbox_coords(long_side_length, short_side_length, short_side_coord_min
     return short_side_coord_min, short_side_coord_max
 
 
-def get_square_cropping_coords(mask, min_square_size=None, margin=None):
+def get_square_cropping_coords(mask, min_square_size=None, margin=None, original_size=512):
     ys, xs = torch.where(mask == 1)
     x_start, x_end, y_start, y_end = xs.min().item(), xs.max().item() + 1, ys.min().item(), ys.max().item() + 1
     w, h = x_end - x_start, y_end - y_start
     if margin is not None:
-        min_square_size = min(max(w, h) + margin, 512)
+        min_square_size = min(max(w, h) + margin, original_size)
     if min_square_size is not None and max(w, h) < min_square_size:
         if w < h:
             # diff = max(min_square_size, h) - h
@@ -30,9 +30,9 @@ def get_square_cropping_coords(mask, min_square_size=None, margin=None):
             if y_start - math.ceil(diff / 2) < 0:
                 offset_end -= y_start - math.ceil(diff / 2)
                 offset_start = y_start
-            elif y_end + math.floor(diff / 2) > 512:
-                offset_start += y_end + math.floor(diff / 2) - 512
-                offset_end = 512 - y_end
+            elif y_end + math.floor(diff / 2) > original_size:
+                offset_start += y_end + math.floor(diff / 2) - original_size
+                offset_end = original_size - y_end
             y_start -= offset_start
             y_end += offset_end
 
@@ -43,17 +43,17 @@ def get_square_cropping_coords(mask, min_square_size=None, margin=None):
             if x_start - math.ceil(diff / 2) < 0:
                 offset_end -= x_start - math.ceil(diff / 2)
                 offset_start = x_start
-            elif x_end + math.floor(diff / 2) > 512:
-                offset_start += x_end + math.floor(diff / 2) - 512
-                offset_end = 512 - x_end
+            elif x_end + math.floor(diff / 2) > original_size:
+                offset_start += x_end + math.floor(diff / 2) - original_size
+                offset_end = original_size - x_end
             x_start -= offset_start
             x_end += offset_end
 
     w, h = x_end - x_start, y_end - y_start
     if w > h:
-        y_start, y_end = adjust_bbox_coords(w, h, y_start, y_end, 512)
+        y_start, y_end = adjust_bbox_coords(w, h, y_start, y_end, original_size)
     elif w < h:
-        x_start, x_end = adjust_bbox_coords(h, w, x_start, x_end, 512)
+        x_start, x_end = adjust_bbox_coords(h, w, x_start, x_end, original_size)
     return x_start, x_end, y_start, y_end, max(w, h)
 
 

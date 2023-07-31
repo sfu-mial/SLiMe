@@ -36,8 +36,18 @@ class CoSegmenterTrainer(pl.LightningModule):
             self.translator[0].weight.data.zero_()
             self.translator[0].bias.data.zero_()
 
-
-        self.uncond_embedding, self.text_embedding = self.stable_diffusion.get_text_embeds("", "")
+        if self.config.text_prompt == 'part_name':
+            text_prompts = self.config.part_names[1].split("_")
+            if len(text_prompts) > 1:
+                if len(text_prompts[0]) > len(text_prompts[1]):
+                    self.text_prompt = text_prompts[0]
+                else:
+                    self.text_prompt = text_prompts[1]
+            else:
+                self.text_prompt = text_prompts[0]
+        else:
+            self.text_prompt = self.config.text_prompt
+        self.uncond_embedding, self.text_embedding = self.stable_diffusion.get_text_embeds(self.text_prompt, "")
         
         if self.config.objective_to_optimize == "text_embedding":
             if self.config.train:
@@ -48,6 +58,10 @@ class CoSegmenterTrainer(pl.LightningModule):
                     self.embeddings_to_optimize.append(embedding)
 
         self.checkpoint_dir = self.config.checkpoint_dir
+        if self.config.use_all_tokens_for_training:
+            self.token_ids = list(range(77))
+        else:
+            self.token_ids = list(range(len(self.config.part_names)))
 
     def on_fit_start(self) -> None:
         self.checkpoint_dir = f"{self.config.checkpoint_dir}_{self.logger.log_dir.split('/')[-1]}"
@@ -76,7 +90,7 @@ class CoSegmenterTrainer(pl.LightningModule):
             t_embedding,
             src_images, t=torch.tensor(20),
             back_propagate_loss=False, generate_new_noise=self.generate_noise,
-            attention_output_size=self.config.mask_size, token_ids=list(range(77)), train=True, average_layers=True, apply_softmax=False)
+            attention_output_size=self.config.mask_size, token_ids=self.token_ids, train=True, average_layers=True, apply_softmax=False)
         
         self.generate_noise = False
         loss1 = torch.nn.functional.cross_entropy(sd_cross_attention_maps2[None, ...], mask1[None, ...].type(torch.long))
@@ -84,7 +98,7 @@ class CoSegmenterTrainer(pl.LightningModule):
         loss2 = 0
         self_attention_maps = []
         if sd_self_attention_maps is not None:
-            small_sd_cross_attention_maps2 = torch.nn.functional.interpolate(sd_cross_attention_maps2[None, ...], 64, mode="bicubic")[0]
+            small_sd_cross_attention_maps2 = torch.nn.functional.interpolate(sd_cross_attention_maps2[None, ...], 64, mode="bilinear")[0]
             for i in range(len(self.config.part_names)):
                 self_attention_map = (sd_self_attention_maps * small_sd_cross_attention_maps2[i].flatten()[..., None, None]).sum(dim=0)
                 loss2 = loss2 + torch.nn.functional.mse_loss(self_attention_map, torch.where(mask1 == i, 1., 0.))
@@ -135,7 +149,7 @@ class CoSegmenterTrainer(pl.LightningModule):
                     token_ids=list(range(len(self.config.part_names))), train=False)
             self_attention_map = \
                     torch.nn.functional.interpolate(sd_self_attention_maps[None, ...],
-                                                    crop_size, mode="bicubic")[0].detach()
+                                                    crop_size, mode="bilinear")[0].detach()
             
             attention_maps = sd_cross_attention_maps2.flatten(1, 2).detach()  # len(self.config.checkpoint_dir) , 64x64
             max_values = attention_maps.max(dim=1).values  # len(self.config.checkpoint_dir)
@@ -169,7 +183,7 @@ class CoSegmenterTrainer(pl.LightningModule):
         #                 token_ids=list(range(len(self.config.part_names))), train=False)
         #         self_attention_map = \
         #             torch.nn.functional.interpolate(sd_self_attention_maps[None, ...],
-        #                                             crop_size, mode="bicubic")[0].detach()
+        #                                             crop_size, mode="bilinear")[0].detach()
 
         #         # self_attention_map : 64x64, 64, 64
         #         # sd_cross_attention_maps2 : len(self.config.checkpoint_dir), 64, 64
@@ -224,7 +238,7 @@ class CoSegmenterTrainer(pl.LightningModule):
                 attention_output_size=64,
                 token_ids=list(range(len(self.config.part_names))), train=False)
         self_attention_map = sd_self_attention_maps.detach()
-        self_attention_map = torch.nn.functional.interpolate(self_attention_map[None, ...], (image.shape[2], image.shape[3]), mode="bicubic")[0]
+        self_attention_map = torch.nn.functional.interpolate(self_attention_map[None, ...], (image.shape[2], image.shape[3]), mode="bilinear")[0]
         attention_maps = sd_cross_attention_maps2.flatten(1, 2).detach()  # len(self.config.checkpoint_dir) , 64x64
         sd_cross_attention_maps2 = None
         sd_self_attention_maps = None
@@ -255,8 +269,8 @@ class CoSegmenterTrainer(pl.LightningModule):
         if torch.sum(torch.where(final_mask > 0, 1, 0)) == 0:
             x_start, x_end, y_start, y_end, crop_size = 0, 512, 0, 512, 512
         else:
-            x_start, x_end, y_start, y_end, crop_size = get_square_cropping_coords(torch.where(final_mask > 0, 1, 0), min_square_size=self.config.min_square_size)
-        
+            x_start, x_end, y_start, y_end, crop_size = get_square_cropping_coords(torch.where(final_mask > 0, 1, 0), min_square_size=self.config.min_square_size, original_size=image.shape[2])
+
         cropped_image = image[:, :, y_start:y_end, x_start:x_end]
         
         if self.config.log_images:
@@ -277,7 +291,7 @@ class CoSegmenterTrainer(pl.LightningModule):
         
         self_attention_map = \
             torch.nn.functional.interpolate(sd_self_attention_maps[None, ...],
-                                            crop_size, mode="bicubic")[0].detach()
+                                            crop_size, mode="bilinear")[0].detach()
         
         # self_attention_map : 64x64, 64, 64
         # sd_cross_attention_maps2 : len(self.config.checkpoint_dir), 64, 64
@@ -376,7 +390,7 @@ class CoSegmenterTrainer(pl.LightningModule):
         else:
             self.stable_diffusion.setup(self.device, torch.device(f"cuda:{self.config.second_gpu_id}"))
         self.stable_diffusion.change_hooks(attention_layers_to_use=self.config.attention_layers_to_use)  # exclude self attention layer
-        uncond_embedding, text_embedding = self.stable_diffusion.get_text_embeds("", "")
+        uncond_embedding, text_embedding = self.stable_diffusion.get_text_embeds(self.text_prompt, "")
         self.embeddings_to_optimize = []
         if self.config.objective_to_optimize == "text_embedding":
             for i in range(1, len(self.config.part_names)):
