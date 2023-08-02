@@ -269,7 +269,7 @@ class CoSegmenterTrainer(pl.LightningModule):
         if torch.sum(torch.where(final_mask > 0, 1, 0)) == 0:
             x_start, x_end, y_start, y_end, crop_size = 0, 512, 0, 512, 512
         else:
-            x_start, x_end, y_start, y_end, crop_size = get_square_cropping_coords(torch.where(final_mask > 0, 1, 0), margin=10, min_square_size=self.config.min_square_size, original_size=image.shape[2])
+            x_start, x_end, y_start, y_end, crop_size = get_square_cropping_coords(torch.where(final_mask > 0, 1, 0), margin=self.config.crop_margin, min_square_size=self.config.min_square_size, original_size=image.shape[2])
 
         cropped_image = image[:, :, y_start:y_end, x_start:x_end]
         

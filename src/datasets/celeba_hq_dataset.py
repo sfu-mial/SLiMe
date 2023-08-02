@@ -141,8 +141,8 @@ class CelebaHQDataset(Dataset):
                 A.Resize(512, 512),
                 A.HorizontalFlip(),
                 # A.RandomScale((0.5, 2), always_apply=True),
-                A.GaussianBlur(blur_limit=(1, 21)),
-                A.RandomResizedCrop(512, 512, (0.1, 1)),
+                A.GaussianBlur(blur_limit=(1, 31)),
+                A.RandomResizedCrop(512, 512, (0.3, 1)),
                 A.Rotate((-10, 10), border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0),
                 ToTensorV2()
             ])
