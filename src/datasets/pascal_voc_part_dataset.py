@@ -143,9 +143,9 @@ class PascalVOCPartDataset(Dataset):
         self.return_whole = False
         if self.part_names_to_return[1] == 'whole':
             if object_name_to_return == 'car':
-                self.part_names_to_return = ['background','body','light','plate','wheel','window']
+                self.part_names_to_return = ['background', 'body', 'light', 'plate', 'wheel', 'window']
             elif object_name_to_return == 'horse':
-                self.part_names_to_return = ['background','head', 'neck+torso', 'leg', 'tial']
+                self.part_names_to_return = ['background', 'head', 'neck+torso', 'leg', 'tial']
             self.return_whole = True
         self.current_idx = None
         self.final_min_crop_size = final_min_crop_size

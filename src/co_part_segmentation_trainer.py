@@ -119,7 +119,7 @@ class CoSegmenterTrainer(pl.LightningModule):
                 self.logger.experiment.add_image("train self attention map", self_attention_map_grid, self.counter)
                 # self.logger.log_image(key="train self attention map", images=self_attention_maps.unsqueeze(dim=1), step=self.counter)
             images_grid = torchvision.utils.make_grid(src_images.detach().cpu())
-            sd_attention_maps_grid2 = torchvision.utils.make_grid(sd_cross_attention_maps2.detach().cpu())
+            sd_attention_maps_grid2 = torchvision.utils.make_grid(sd_cross_attention_maps2[:10].detach().cpu())
             mask1_grid = torchvision.utils.make_grid(mask1[None, ...].detach().cpu()/mask1[None, ...].detach().cpu().max())
 
             self.logger.experiment.add_image("train image", images_grid, self.counter)
@@ -269,13 +269,21 @@ class CoSegmenterTrainer(pl.LightningModule):
         if torch.sum(torch.where(final_mask > 0, 1, 0)) == 0:
             x_start, x_end, y_start, y_end, crop_size = 0, 512, 0, 512, 512
         else:
-            x_start, x_end, y_start, y_end, crop_size = get_square_cropping_coords(torch.where(final_mask > 0, 1, 0), min_square_size=self.config.min_square_size, original_size=image.shape[2])
+            x_start, x_end, y_start, y_end, crop_size = get_square_cropping_coords(torch.where(final_mask > 0, 1, 0), margin=10, min_square_size=self.config.min_square_size, original_size=image.shape[2])
 
         cropped_image = image[:, :, y_start:y_end, x_start:x_end]
         
         if self.config.log_images:
+            final_mask_grid = torchvision.utils.make_grid(final_mask)
             image_grid = torchvision.utils.make_grid(cropped_image)
-            self.logger.experiment.add_image("test cropped mask", image_grid, batch_idx)
+            masked_image = image[0].cpu() * (
+                    1 - final_mask[None, ...]) + torch.stack(
+                [final_mask * 0, final_mask * 0, final_mask], dim=0)
+            masked_image_grid = torchvision.utils.make_grid(
+                masked_image)
+            self.logger.experiment.add_image("mask before zoom", final_mask_grid, batch_idx)
+            self.logger.experiment.add_image("masked image before zoom", masked_image_grid, batch_idx)
+            self.logger.experiment.add_image("cropped image", image_grid, batch_idx)
             # self.logger.log_image(key="test cropped mask", images=cropped_image)
         final_attention_map = torch.zeros(len(self.config.part_names), crop_size, crop_size)
         # uncond_embeddings, text_embeddings = self.stable_diffusion.get_text_embeds("", "")
