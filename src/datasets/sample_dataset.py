@@ -8,6 +8,7 @@ from albumentations.pytorch import ToTensorV2
 import cv2
 import numpy as np
 
+
 class SampleDataset(Dataset):
     def __init__(self, image_dirs, mask_dirs, train=True, mask_size=256):
         self.image_dirs = image_dirs
@@ -21,9 +22,9 @@ class SampleDataset(Dataset):
             #               mask_value=0),
             A.HorizontalFlip(),
             # A.RandomScale((0.5, 2), always_apply=True),
-            A.GaussianBlur(blur_limit=(1, 3)),
-            A.RandomResizedCrop(512, 512, (0.05, 1)),
-            A.Rotate((-30, 30), border_mode=cv2.BORDER_REPLICATE, value=0, mask_value=0),
+            A.GaussianBlur(blur_limit=(1, 31)),
+            A.RandomResizedCrop(512, 512, (0.1, 1)),
+            A.Rotate((-30, 30), border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0),
             ToTensorV2()
         ])
         self.test_transform = A.Compose([
@@ -35,9 +36,16 @@ class SampleDataset(Dataset):
     def __getitem__(self, idx):
         image = Image.open(self.image_dirs[idx])
         if self.train:
-            mask = np.array(Image.open(self.mask_dirs[idx])) / 255
+            mask = np.where(np.array(Image.open(self.mask_dirs[idx])) / 255 > 0, 1, 0)
             if len(mask.shape) == 3:
                 mask = mask[:, :, 0]
+            if len(self.mask_dirs) > 1:
+                for i in range(1, len(self.mask_dirs)):
+                    mask1 = np.where(np.array(Image.open(self.mask_dirs[idx+i])) / 255 > 0, 1, 0)
+                    if len(mask1.shape) == 3:
+                        mask1 = mask1[:, :, 0]
+                    mask = np.where(mask1 > 0, i+1, mask)
+            values, counts = np.unique(mask, return_counts=True)
             mask_is_included = False
             original_mask_size = np.where(mask > 0, 1, 0).sum()
             while not mask_is_included:
@@ -52,9 +60,16 @@ class SampleDataset(Dataset):
             return image/255, mask
         else:
             if self.mask_dirs is not None:
-                mask = np.array(Image.open(self.mask_dirs[idx])) / 255
+                mask = np.where(np.array(Image.open(self.mask_dirs[idx])) / 255 > 0, 1, 0)
                 if len(mask.shape) == 3:
                     mask = mask[:, :, 0]
+                if len(self.mask_dirs) > 2:
+                    for i in range(1, len(self.mask_dirs)):
+                        mask1 = np.where(np.array(Image.open(self.mask_dirs[idx+i])) / 255 > 0, 1, 0)
+                        if len(mask1.shape) == 3:
+                            mask1 = mask1[:, :, 0]
+                        mask = np.where(mask1 > 0, i + 1, mask)
+                mask = np.where(mask1 > 0, 2, mask)
                 result = self.test_transform(image=np.array(image), mask=mask)
                 mask = result['mask']
             else:
@@ -130,13 +145,13 @@ class SampleDataModule(pl.LightningDataModule):
         if stage == 'fit':
             self.train_dataset = SampleDataset(
                 image_dirs=self.src_image_dirs[0:1],
-                mask_dirs=self.src_mask_dirs[0:1],
+                mask_dirs=self.src_mask_dirs[0:len(self.src_mask_dirs)//2],
                 train=True,
                 mask_size=self.mask_size,
             )
             self.val_dataset = SampleDataset(
                 image_dirs=self.src_image_dirs[1:2],
-                mask_dirs=self.src_mask_dirs[1:2],
+                mask_dirs=self.src_mask_dirs[len(self.src_mask_dirs)//2:],
                 train=False,
             )
         elif stage == 'test':
