@@ -250,13 +250,13 @@ class CoSegmenterTrainer(pl.LightningModule):
             if passed_indices[0] == 0:
                 passed_attention_maps[1:] = torch.where(
                     passed_attention_maps[1:] > passed_attention_maps[1:].mean(dim=1,
-                                                                               keepdim=True) + 2 * passed_attention_maps[
+                                                                               keepdim=True) + 0 * passed_attention_maps[
                                                                                                    1:].std(dim=1,
                                                                                                            keepdim=True),
                     passed_attention_maps[1:], 0)
             else:
                 passed_attention_maps = torch.where(passed_attention_maps > passed_attention_maps.mean(dim=1,
-                                                                                                       keepdim=True) + 2 * passed_attention_maps.std(
+                                                                                                       keepdim=True) + 0 * passed_attention_maps.std(
                     dim=1, keepdim=True), passed_attention_maps, 0)
             for idx, mask_id in enumerate(passed_indices):
                 avg_self_attention_map = (
@@ -324,13 +324,13 @@ class CoSegmenterTrainer(pl.LightningModule):
             if passed_indices[0] == 0:
                 passed_attention_maps[1:] = torch.where(
                     passed_attention_maps[1:] > passed_attention_maps[1:].mean(dim=1,
-                                                                               keepdim=True) + passed_attention_maps[
+                                                                               keepdim=True) + 0 * passed_attention_maps[
                                                                                                    1:].std(dim=1,
                                                                                                            keepdim=True),
                     passed_attention_maps[1:], 0)
             else:
                 passed_attention_maps = torch.where(passed_attention_maps > passed_attention_maps.mean(dim=1,
-                                                                                                       keepdim=True) + passed_attention_maps.std(
+                                                                                                       keepdim=True) + 0 * passed_attention_maps.std(
                     dim=1, keepdim=True), passed_attention_maps, 0)
             for idx, mask_id in enumerate(passed_indices):
                 avg_self_attention_map = (
