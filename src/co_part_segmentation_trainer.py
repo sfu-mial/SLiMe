@@ -20,13 +20,12 @@ class CoSegmenterTrainer(pl.LightningModule):
         self.automatic_optimization = True
         self.stable_diffusion = StableDiffusion(sd_version='2.1', partial_run=False,
                                                 attention_layers_to_use=config.attention_layers_to_use)
-        # if self.config.noise_path is not None:
-        #     noise = torch.load(self.config.noise_path)
-        #     self.stable_diffusion.noise = noise
-        #     self.generate_noise = False
-        # else:
-        #     self.generate_noise = True
-        self.generate_noise = True
+        if self.config.noise_dir is not None:
+            noise = torch.load(self.config.noise_dir)
+            self.stable_diffusion.noise = noise
+            self.generate_noise = False
+        else:
+            self.generate_noise = True
         self.val_epoch_iou = 0
         self.max_val_iou = 0
         if self.config.objective_to_optimize == "translator":
@@ -88,29 +87,32 @@ class CoSegmenterTrainer(pl.LightningModule):
         
         loss, _, sd_cross_attention_maps2, sd_self_attention_maps = self.stable_diffusion.train_step(
             t_embedding,
-            src_images, t=torch.tensor(20),
+            src_images, t=torch.tensor(self.config.t),
             back_propagate_loss=False, generate_new_noise=self.generate_noise,
             attention_output_size=self.config.mask_size, token_ids=self.token_ids, train=True, average_layers=True, apply_softmax=False)
         
         self.generate_noise = False
         loss1 = torch.nn.functional.cross_entropy(sd_cross_attention_maps2[None, ...], mask1[None, ...].type(torch.long))
-        sd_cross_attention_maps2 = sd_cross_attention_maps2.softmax(dim=0)
-        loss2 = 0
-        self_attention_maps = []
-        if sd_self_attention_maps is not None:
-            small_sd_cross_attention_maps2 = torch.nn.functional.interpolate(sd_cross_attention_maps2[None, ...], 64, mode="bilinear")[0]
-            for i in range(len(self.config.part_names)):
-                self_attention_map = (sd_self_attention_maps * small_sd_cross_attention_maps2[i].flatten()[..., None, None]).sum(dim=0)
-                loss2 = loss2 + torch.nn.functional.mse_loss(self_attention_map, torch.where(mask1 == i, 1., 0.))
-                self_attention_maps.append(((self_attention_map - self_attention_map.min()) / (self_attention_map.max() - self_attention_map.min())).detach().cpu())
-        if len(self_attention_maps) > 0:
-            self_attention_maps = torch.stack(self_attention_maps, dim=0)
-        sd_cross_attention_maps2 = torch.unsqueeze(sd_cross_attention_maps2, dim=1)
+        if self.config.self_attention_loss_coef > 0:
+            sd_cross_attention_maps2 = sd_cross_attention_maps2.softmax(dim=0)
+            loss2 = 0
+            self_attention_maps = []
+            if sd_self_attention_maps is not None:
+                small_sd_cross_attention_maps2 = torch.nn.functional.interpolate(sd_cross_attention_maps2[None, ...], 64, mode="bilinear")[0]
+                for i in range(len(self.config.part_names)):
+                    self_attention_map = (sd_self_attention_maps * small_sd_cross_attention_maps2[i].flatten()[..., None, None]).sum(dim=0)
+                    loss2 = loss2 + torch.nn.functional.mse_loss(self_attention_map, torch.where(mask1 == i, 1., 0.))
+                    self_attention_maps.append(((self_attention_map - self_attention_map.min()) / (self_attention_map.max() - self_attention_map.min())).detach().cpu())
+            if len(self_attention_maps) > 0:
+                self_attention_maps = torch.stack(self_attention_maps, dim=0)
+            sd_cross_attention_maps2 = torch.unsqueeze(sd_cross_attention_maps2, dim=1)
 
-        loss = loss1 + self.config.self_attention_loss_coef * loss2
+            loss = loss1 + self.config.self_attention_loss_coef * loss2
+            self.log("loss2", loss2.detach().cpu(), on_step=True, sync_dist=True)
+        else:
+            loss = loss1
 
         self.log("loss1", loss1.detach().cpu(), on_step=True, sync_dist=True)
-        self.log("loss2", loss2.detach().cpu(), on_step=True, sync_dist=True)
         self.log("loss", loss.detach().cpu(), on_step=True, sync_dist=True)
 
         if self.config.log_images:
@@ -144,7 +146,7 @@ class CoSegmenterTrainer(pl.LightningModule):
             with torch.no_grad():
                 _, _, sd_cross_attention_maps2, sd_self_attention_maps = self.stable_diffusion.train_step(
                     self.test_t_embedding, cropped_image,
-                    t=torch.tensor(20), back_propagate_loss=False, generate_new_noise=False,
+                    t=torch.tensor(self.config.t), back_propagate_loss=False, generate_new_noise=False,
                     attention_output_size=64,
                     token_ids=list(range(len(self.config.part_names))), train=False)
             self_attention_map = \
@@ -178,7 +180,7 @@ class CoSegmenterTrainer(pl.LightningModule):
         #         with torch.no_grad():
         #             loss, _, sd_cross_attention_maps2, sd_self_attention_maps = self.stable_diffusion.train_step(
         #                 self.test_t_embedding, cropped_image,
-        #                 t=torch.tensor(20), back_propagate_loss=False, generate_new_noise=False,
+        #                 t=torch.tensor(self.config.t), back_propagate_loss=False, generate_new_noise=False,
         #                 attention_output_size=64,
         #                 token_ids=list(range(len(self.config.part_names))), train=False)
         #         self_attention_map = \
@@ -234,7 +236,7 @@ class CoSegmenterTrainer(pl.LightningModule):
         with torch.no_grad():
             _, _, sd_cross_attention_maps2, sd_self_attention_maps = self.stable_diffusion.train_step(
                 self.test_t_embedding, image,
-                t=torch.tensor(20), back_propagate_loss=False, generate_new_noise=False,
+                t=torch.tensor(self.config.t), back_propagate_loss=False, generate_new_noise=False,
                 attention_output_size=64,
                 token_ids=list(range(len(self.config.part_names))), train=False)
         self_attention_map = sd_self_attention_maps.detach()
@@ -259,16 +261,19 @@ class CoSegmenterTrainer(pl.LightningModule):
                                                                                                        keepdim=True) + 1 * passed_attention_maps.std(
                     dim=1, keepdim=True), passed_attention_maps, 0)
             for idx, mask_id in enumerate(passed_indices):
-                avg_self_attention_map = (
-                        passed_attention_maps[idx][..., None, None] *
-                        self_attention_map).mean(dim=0)
-                avg_self_attention_map_min = avg_self_attention_map.min()
-                avg_self_attention_map_max = avg_self_attention_map.max()
-                coef = (avg_self_attention_map_max - avg_self_attention_map_min) / (
-                        max_values[mask_id] - min_values[mask_id])
-                final_attention_map[mask_id] += (
-                        (avg_self_attention_map / coef) + (
-                        min_values[mask_id] - avg_self_attention_map_min / coef)).cpu()
+                if self.config.self_attention_loss_coef > 0:
+                    avg_self_attention_map = (
+                            passed_attention_maps[idx][..., None, None] *
+                            self_attention_map).mean(dim=0)
+                    avg_self_attention_map_min = avg_self_attention_map.min()
+                    avg_self_attention_map_max = avg_self_attention_map.max()
+                    coef = (avg_self_attention_map_max - avg_self_attention_map_min) / (
+                            max_values[mask_id] - min_values[mask_id])
+                    final_attention_map[mask_id] += (
+                            (avg_self_attention_map / coef) + (
+                            min_values[mask_id] - avg_self_attention_map_min / coef)).cpu()
+                else:
+                    final_attention_map[mask_id] += torch.nn.functional.interpolate(passed_attention_maps[idx].reshape(64, 64)[None, None, ...], (image.shape[2], image.shape[3]), mode="bilinear")[0, 0].cpu()
                 avg_self_attention_map = None
 
         flattened_final_attention_map = final_attention_map.flatten(1, 2)
@@ -277,8 +282,11 @@ class CoSegmenterTrainer(pl.LightningModule):
         final_mask = torch.where(flattened_final_attention_map > (maximum + minimum) / 2, flattened_final_attention_map,
                                  0).reshape(*final_attention_map.shape).argmax(0)
 
+        if self.config.skip_zooming:
+            return final_mask
+        
         if torch.sum(torch.where(final_mask > 0, 1, 0)) == 0:
-            x_start, x_end, y_start, y_end, crop_size = 0, 512, 0, 512, 512
+            x_start, x_end, y_start, y_end, crop_size = 0, image.shape[2], 0, image.shape[2], image.shape[2]
         else:
             x_start, x_end, y_start, y_end, crop_size = get_square_cropping_coords(torch.where(final_mask > 0, 1, 0), margin=self.config.crop_margin, min_square_size=self.config.min_square_size, original_size=image.shape[2])
 
@@ -304,7 +312,7 @@ class CoSegmenterTrainer(pl.LightningModule):
         with torch.no_grad():
             _, _, sd_cross_attention_maps2, sd_self_attention_maps = self.stable_diffusion.train_step(
                 self.test_t_embedding, cropped_image,
-                t=torch.tensor(20), back_propagate_loss=False, generate_new_noise=False,
+                t=torch.tensor(self.config.t), back_propagate_loss=False, generate_new_noise=False,
                 attention_output_size=64,
                 token_ids=list(range(len(self.config.part_names))), train=False)
         
@@ -333,16 +341,19 @@ class CoSegmenterTrainer(pl.LightningModule):
                                                                                                        keepdim=True) + 0 * passed_attention_maps.std(
                     dim=1, keepdim=True), passed_attention_maps, 0)
             for idx, mask_id in enumerate(passed_indices):
-                avg_self_attention_map = (
-                            passed_attention_maps[idx][..., None, None] *
-                            self_attention_map).mean(dim=0)
-                avg_self_attention_map_min = avg_self_attention_map.min()
-                avg_self_attention_map_max = avg_self_attention_map.max()
-                coef = (avg_self_attention_map_max - avg_self_attention_map_min) / (
-                            max_values[mask_id] - min_values[mask_id])
-                final_attention_map[mask_id] += (
-                        (avg_self_attention_map / coef) + (
-                            min_values[mask_id] - avg_self_attention_map_min / coef)).cpu()
+                if self.config.self_attention_loss_coef > 0:
+                    avg_self_attention_map = (
+                                passed_attention_maps[idx][..., None, None] *
+                                self_attention_map).mean(dim=0)
+                    avg_self_attention_map_min = avg_self_attention_map.min()
+                    avg_self_attention_map_max = avg_self_attention_map.max()
+                    coef = (avg_self_attention_map_max - avg_self_attention_map_min) / (
+                                max_values[mask_id] - min_values[mask_id])
+                    final_attention_map[mask_id] += (
+                            (avg_self_attention_map / coef) + (
+                                min_values[mask_id] - avg_self_attention_map_min / coef)).cpu()
+                else:
+                    final_attention_map[mask_id] += torch.nn.functional.interpolate(passed_attention_maps[idx].reshape(64, 64)[None, None, ...], crop_size, mode="bilinear")[0, 0].cpu()
         flattened_final_attention_map = final_attention_map.flatten(1, 2)
         minimum = flattened_final_attention_map.min(1, keepdim=True).values
         maximum = flattened_final_attention_map.max(1, keepdim=True).values
@@ -398,7 +409,12 @@ class CoSegmenterTrainer(pl.LightningModule):
         self.log("val mean iou", mean_iou, on_step=True, sync_dist=True)
         self.val_epoch_iou = mean_iou
         return torch.tensor(0.)
-
+    # def on_train_epoch_end(self) -> None:
+    #     for i, embedding in enumerate(self.embeddings_to_optimize):
+    #         torch.save(embedding,
+    #                 os.path.join(self.checkpoint_dir, f"embedding_{i}.pth"))
+    #     torch.save(self.stable_diffusion.noise.cpu(),
+    #                    os.path.join(self.checkpoint_dir, "noise.pth"))
     def on_validation_epoch_end(self):
         if self.val_epoch_iou >= self.max_val_iou:
             self.max_val_iou = self.val_epoch_iou

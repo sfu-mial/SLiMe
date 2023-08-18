@@ -1,14 +1,14 @@
 import pytorch_lightning as pl
-from pytorch_lightning.loggers import WandbLogger
 
 from src.co_part_segmentation_trainer import (
     CoSegmenterTrainer,
 )
-from src.config import Config
 from src.datasets.pascal_voc_part_dataset import PascalVOCPartDataModule
 from src.datasets.sample_dataset import SampleDataModule
 from src.datasets.celeba_hq_dataset import CelebaHQDataModule
 from src.datasets.paper_test_sample_dataset import PaperTestSampleDataModule
+from src.datasets.ade20k_dataset import ADE20KDataModule
+from src.datasets.cat15_dataset import CAT15DataModule
 from src.arguments import init_args
 
 def main():
@@ -68,6 +68,20 @@ def main():
             mask_size=config.mask_size,
             zero_pad_test_output=config.zero_pad_test_output,
         )
+    elif config.dataset == 'ade20k':
+        dm = ADE20KDataModule(
+            train_data_dir=config.train_data_dir,
+            test_data_dir=config.test_data_dir,
+            object_name=config.object_name,
+            mask_size=config.mask_size
+        )
+    elif config.dataset == 'cat15':
+        dm = CAT15DataModule(
+            train_data_dir=config.train_data_dir,
+            test_data_dir=config.test_data_dir,
+            part_name=config.part_names[0],
+            mask_size=config.mask_size
+        )
     model = CoSegmenterTrainer(config=config)
     if isinstance(config.gpu_id, int):
         gpu_id = [config.gpu_id]
@@ -79,7 +93,7 @@ def main():
         default_root_dir=config.base_dir,
         max_epochs=config.epochs,
         devices=gpu_id,
-        accumulate_grad_batches=4,
+        accumulate_grad_batches=config.accumulate_grad_batches,
         # precision=16,
         # logger=wandb_logger,
         log_every_n_steps=1,

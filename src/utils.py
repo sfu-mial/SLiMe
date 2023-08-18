@@ -22,7 +22,6 @@ def get_square_cropping_coords(mask, min_square_size=0, margin=None, original_si
     x_start, x_end, y_start, y_end = xs.min().item(), xs.max().item() + 1, ys.min().item(), ys.max().item() + 1
     w, h = x_end - x_start, y_end - y_start
     aux_min_square_size = 0
-    min_square_size = min(max(int(torch.sqrt(mask.sum() / 0.20).item()), 100), original_size)
     if margin is not None:
         aux_min_square_size = min(max(w, h) + int(max(w, h)*margin/100), original_size)
     if min_square_size is not None:

@@ -22,8 +22,8 @@ class SampleDataset(Dataset):
             #               mask_value=0),
             A.HorizontalFlip(),
             # A.RandomScale((0.5, 2), always_apply=True),
-            A.GaussianBlur(blur_limit=(1, 31)),
-            A.RandomResizedCrop(512, 512, (0.1, 1)),
+            A.GaussianBlur(blur_limit=(1, 21)),
+            A.RandomResizedCrop(512, 512, (0.2, 1)),
             A.Rotate((-30, 30), border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0),
             ToTensorV2()
         ])
@@ -36,22 +36,22 @@ class SampleDataset(Dataset):
     def __getitem__(self, idx):
         image = Image.open(self.image_dirs[idx])
         if self.train:
-            mask = np.where(np.array(Image.open(self.mask_dirs[idx])) / 255 > 0, 1, 0)
+            mask = np.where(np.array(Image.open(self.mask_dirs[idx])) / 255 > 0.5, 1, 0)
             if len(mask.shape) == 3:
                 mask = mask[:, :, 0]
             if len(self.mask_dirs) > 1:
                 for i in range(1, len(self.mask_dirs)):
-                    mask1 = np.where(np.array(Image.open(self.mask_dirs[idx+i])) / 255 > 0, 1, 0)
+                    mask1 = np.where(np.array(Image.open(self.mask_dirs[idx+i])) / 255 > 0.5, 1, 0)
                     if len(mask1.shape) == 3:
                         mask1 = mask1[:, :, 0]
                     mask = np.where(mask1 > 0, i+1, mask)
-            values, counts = np.unique(mask, return_counts=True)
+            # values, counts = np.unique(mask, return_counts=True)
             mask_is_included = False
             original_mask_size = np.where(mask > 0, 1, 0).sum()
             while not mask_is_included:
                 result = self.train_transform(image=np.array(image), mask=mask)
                 # mask = torch.as_tensor(result["mask"])
-                if np.where(result["mask"] > 0, 1, 0).sum() / original_mask_size > 0.4:
+                if np.where(result["mask"] > 0, 1, 0).sum() / original_mask_size > 0.2:
                     mask_is_included = True
             image = result["image"]
             mask = torch.as_tensor(result["mask"])
@@ -60,16 +60,15 @@ class SampleDataset(Dataset):
             return image/255, mask
         else:
             if self.mask_dirs is not None:
-                mask = np.where(np.array(Image.open(self.mask_dirs[idx])) / 255 > 0, 1, 0)
+                mask = np.where(np.array(Image.open(self.mask_dirs[idx])) / 255 > 0.5, 1, 0)
                 if len(mask.shape) == 3:
                     mask = mask[:, :, 0]
                 if len(self.mask_dirs) > 2:
                     for i in range(1, len(self.mask_dirs)):
-                        mask1 = np.where(np.array(Image.open(self.mask_dirs[idx+i])) / 255 > 0, 1, 0)
+                        mask1 = np.where(np.array(Image.open(self.mask_dirs[idx+i])) / 255 > 0.5, 1, 0)
                         if len(mask1.shape) == 3:
                             mask1 = mask1[:, :, 0]
                         mask = np.where(mask1 > 0, i + 1, mask)
-                mask = np.where(mask1 > 0, 2, mask)
                 result = self.test_transform(image=np.array(image), mask=mask)
                 mask = result['mask']
             else:

@@ -41,10 +41,10 @@ def add_base_args(parser):
     parser.add_argument('--gpu_id', type=int, default=0)
     parser.add_argument('--second_gpu_id', type=int, default=None)
     parser.add_argument('--train', action='store_true', default=False)
-    parser.add_argument('--dataset', type=str, default='pascal', choices=['sample', 'pascal', 'celeba-hq', 'paper_test'])
+    parser.add_argument('--dataset', type=str, default='pascal', choices=['sample', 'pascal', 'celeba-hq', 'paper_test', 'ade20k', 'cat15'])
     parser.add_argument('--noise_dir', type=str, default=None)
     parser.add_argument('--checkpoint_dir', type=str, required=True)
-    parser.add_argument('--part_names', nargs='+', type=str, required=True)
+    parser.add_argument('--part_names', nargs='+', type=str, required=False)
     parser.add_argument('--objective_to_optimize', type=str, default='text_embedding')
     parser.add_argument('--log_images', action='store_true', default=False)
     parser.add_argument('--text_prompt', type=str, default='')
@@ -54,6 +54,11 @@ def add_sample_dataset_args(parser):
     parser.add_argument('--src_image_paths', nargs='+', type=str)
     parser.add_argument('--src_mask_paths', nargs='+', type=str)
     parser.add_argument('--target_image_path', nargs='+', type=str)
+    return parser
+
+def add_ade20k_dataset_args(parser):
+    parser.add_argument('--train_data_dir', type=str)
+    parser.add_argument('--test_data_dir', type=str)
     return parser
 
 def add_pascal_dataset_args(parser):
@@ -95,6 +100,9 @@ def add_train_args(parser):
     parser.add_argument('--val_data_ids', nargs='+', type=int)
     parser.add_argument('--train_data_ids', nargs='+', type=int)
     parser.add_argument('--use_all_tokens_for_training', action='store_true', default=False)
+    parser.add_argument('--skip_zooming', action='store_true', default=False)
+    parser.add_argument('--t', type=int, default=20)
+    parser.add_argument('--accumulate_grad_batches', type=int, default=4)
     return parser
 
 def add_test_args(parser):
@@ -116,5 +124,6 @@ def init_args():
     parser = add_paper_test_dataset_args(parser)
     parser = add_train_args(parser)
     parser = add_test_args(parser)
+    parser = add_ade20k_dataset_args(parser)
     args = parser.parse_args()
     return args

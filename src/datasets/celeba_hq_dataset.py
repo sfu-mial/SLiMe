@@ -95,10 +95,10 @@ class CelebaHQDataset(Dataset):
                     part_paths = part_data_paths.get(part_name, [])
                     part_paths.append(path)
                     part_data_paths[part_name] = part_paths
-                    if part_name in non_skin_part_names:
-                        part_paths = part_data_paths.get("non_skin", [])
-                        part_paths.append(path)
-                        part_data_paths["non_skin"] = part_paths
+                    # if part_name in non_skin_part_names:
+                    #     part_paths = part_data_paths.get("non_skin", [])
+                    #     part_paths.append(path)
+                    #     part_data_paths["non_skin"] = part_paths
             
             data_sample_has_part = False
             for part_name in self.parts_to_return[1:]:
@@ -158,21 +158,27 @@ class CelebaHQDataset(Dataset):
         masks_paths = self.masks_paths[idx]
         final_mask = np.zeros((512, 512), dtype=np.float64)
         for idx, part_name in enumerate(self.parts_to_return):
-            if part_name == "skin":
-                non_skin_mask = 0
-                for path in masks_paths["non_skin"]:
-                    mask = np.array(Image.open(path))[:, :, 0] / 255
-                    non_skin_mask += mask
-                non_skin_mask = np.where(non_skin_mask > 0, 1, 0)
-                skin_mask = np.array(Image.open(masks_paths[part_name][0]))[:, :, 0] / 255
-                aux_mask = np.where(non_skin_mask > 0, 0, skin_mask)
-            else:
-                aux_mask = 0
-                if part_name in masks_paths:
-                    for path in masks_paths[part_name]:
-                        mask = np.array(Image.open(path))[:, :, 0] / 255
-                        aux_mask += np.where(mask>0, 1, 0)
-                    aux_mask = np.where(aux_mask > 0, 1, 0)
+            # if part_name == "skin":
+            #     non_skin_mask = 0
+            #     for path in masks_paths["non_skin"]:
+            #         mask = np.where(np.array(Image.open(path))[:, :, 0] / 255 > 0.5, 1, 0)
+            #         non_skin_mask += mask
+            #     non_skin_mask = np.where(non_skin_mask > 0, 1, 0)
+            #     skin_mask = np.where(np.array(Image.open(masks_paths[part_name][0]))[:, :, 0] / 255 > 0.5, 1, 0)
+            #     aux_mask = np.where(non_skin_mask > 0, 0, skin_mask)
+            # else:
+            #     aux_mask = 0
+            #     if part_name in masks_paths:
+            #         for path in masks_paths[part_name]:
+            #             mask = np.where(np.array(Image.open(path))[:, :, 0] / 255 > 0.5, 1, 0)
+            #             aux_mask += np.where(mask>0, 1, 0)
+            #         aux_mask = np.where(aux_mask > 0, 1, 0)
+            aux_mask = 0
+            if part_name in masks_paths:
+                for path in masks_paths[part_name]:
+                    mask = np.where(np.array(Image.open(path))[:, :, 0] / 255 > 0.5, 1, 0)
+                    aux_mask += np.where(mask>0, 1, 0)
+                aux_mask = np.where(aux_mask > 0, 1, 0)
             if not isinstance(aux_mask, int):
                 final_mask = np.where(aux_mask > 0, idx, final_mask)
         if self.return_whole:
