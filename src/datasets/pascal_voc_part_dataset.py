@@ -2,7 +2,7 @@ from typing import Tuple
 
 import cv2
 import os
-from src.utils import adjust_bbox_coords, get_bbox_data
+from src.utils import adjust_bbox_coords, get_bbox_data, get_random_crop_coordinates
 import numpy as np
 import pytorch_lightning as pl
 import torch.nn.functional
@@ -147,10 +147,10 @@ class PascalVOCPartDataset(Dataset):
             elif object_name_to_return == 'horse':
                 self.part_names_to_return = ['background', 'head', 'neck+torso', 'leg', 'tial']
             self.return_whole = True
-        self.current_idx = None
         self.final_min_crop_size = final_min_crop_size
         self.single_object = single_object
         self.zero_pad_test_output = zero_pad_test_output
+        self.current_part_idx = 0
         counter_ = 0
         with open(data_file_ids_file) as file:
             data_file_ids = file.readlines()
@@ -309,19 +309,33 @@ class PascalVOCPartDataset(Dataset):
                 ToTensorV2()
             ])
         else:
-            self.train_transform = A.Compose([
+            self.train_transform_1 = A.Compose([
                 A.Resize(512, 512),
-                # A.LongestMaxSize(512),
-                # A.PadIfNeeded(512, 512, border_mode=cv2.BORDER_CONSTANT, value=0,
-                #               mask_value=0),
                 A.HorizontalFlip(),
                 # A.RandomScale((0.5, 2), always_apply=True),
-                A.GaussianBlur(blur_limit=(1, 31)),
-                # A.Persepective(scale=(0.05, 0.1), pad_mode=cv2.BORDER_REPLICATE),
-                A.RandomResizedCrop(512, 512, (0.4, 1)),
-                A.Rotate((-10, 10), border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0),
-                ToTensorV2()
+                A.GaussianBlur(blur_limit=(1, 15)),
             ])
+
+            self.train_transform_2 = A.Compose([
+                # A.RandomResizedCrop(512, 512, (0.4, 1), ratio=(1., 1.)),
+                A.Resize(512, 512),
+                A.Rotate((-10, 10), border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0),
+                ToTensorV2(),
+            ])
+
+            # self.train_transform = A.Compose([
+            #     A.Resize(512, 512),
+            #     # A.LongestMaxSize(512),
+            #     # A.PadIfNeeded(512, 512, border_mode=cv2.BORDER_CONSTANT, value=0,
+            #     #               mask_value=0),
+            #     A.HorizontalFlip(),
+            #     # A.RandomScale((0.5, 2), always_apply=True),
+            #     A.GaussianBlur(blur_limit=(1, 31)),
+            #     # A.Persepective(scale=(0.05, 0.1), pad_mode=cv2.BORDER_REPLICATE),
+            #     A.RandomResizedCrop(512, 512, (0.4, 1)),
+            #     A.Rotate((-10, 10), border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0),
+            #     ToTensorV2()
+            # ])
             self.test_transform = A.Compose([
                 # A.SmallestMaxSize(512),
                 A.Resize(512, 512),
@@ -390,17 +404,30 @@ class PascalVOCPartDataset(Dataset):
         if self.return_whole:
             mask = np.where(mask > 0, 1, 0)
         if self.train:
+            result = self.train_transform_1(image=np.array(image), mask=mask)
+            image = result['image']
+            mask = result['mask']
             mask_is_included = False
-            original_mask_size = np.where(mask > 0, 1, 0).sum()
+            original_mask_size = np.where(mask == self.current_part_idx+1, 1, 0).sum()
+            # original_mask_size = np.where(mask > 0, 1, 0).sum()
             while not mask_is_included:
-                result = self.train_transform(image=np.array(image), mask=mask)
-                # mask = torch.as_tensor(result["mask"])
-                if np.where(result["mask"] > 0, 1, 0).sum() / original_mask_size > 0.3:
+                x_start, x_end, y_start, y_end = get_random_crop_coordinates((0.5, 1), 512)
+                aux_mask = mask[y_start:y_end, x_start:x_end]
+                if original_mask_size == 0 or np.where(aux_mask == self.current_part_idx+1, 1, 0).sum() / original_mask_size > 0.3:
                     mask_is_included = True
-            image = result["image"]
-            mask = torch.as_tensor(result["mask"])
+                # result = self.train_transform(image=np.array(image), mask=mask)
+                # # mask = torch.as_tensor(result["mask"])
+                # if np.where(result["mask"] > 0, 1, 0).sum() / original_mask_size > 0.3:
+                #     mask_is_included = True
+            image = image[y_start:y_end, x_start:x_end]
+            result = self.train_transform_2(image=image, mask=aux_mask)
+            mask, image = result['mask'], result['image']    
+            # image = result["image"]
+            # mask = torch.as_tensor(result["mask"])
             mask = \
                 torch.nn.functional.interpolate(mask[None, None, ...].type(torch.float), self.mask_size, mode="nearest")[0, 0]
+            self.current_part_idx += 1
+            self.current_part_idx = self.current_part_idx % len(self.part_names_to_return[1:])
             return image/255, mask
         else:
             result = self.test_transform(image=np.array(image), mask=mask)

@@ -1,7 +1,7 @@
 import math
 import numpy as np
 import torch
-
+import random
 
 def adjust_bbox_coords(long_side_length, short_side_length, short_side_coord_min, short_side_coord_max,
                        short_side_original_length):
@@ -18,14 +18,13 @@ def adjust_bbox_coords(long_side_length, short_side_length, short_side_coord_min
 
 def get_square_cropping_coords(mask, min_square_size=0, margin=None, original_size=512):
     ys, xs = torch.where(mask == 1)
-    min_square_size = max(min(max(int(torch.sqrt(mask.sum() * 10).item()), 100), original_size), min_square_size)
+    # min_square_size = max(min(max(int(torch.sqrt(mask.sum() * 10).item()), 100), original_size), min_square_size)
     x_start, x_end, y_start, y_end = xs.min().item(), xs.max().item() + 1, ys.min().item(), ys.max().item() + 1
     w, h = x_end - x_start, y_end - y_start
     aux_min_square_size = 0
     if margin is not None:
         aux_min_square_size = min(max(w, h) + int(max(w, h)*margin/100), original_size)
-    if min_square_size is not None:
-        min_square_size = max(aux_min_square_size, min_square_size)
+    min_square_size = max(aux_min_square_size, min_square_size)
     if max(w, h) < min_square_size:
         if w < h:
             # diff = max(min_square_size, h) - h
@@ -98,3 +97,17 @@ def get_crops_coords(image_size, crop_size, num_crops_per_side):
 def get_bbox_data(mask):
     ys, xs = np.where(mask == 1)
     return xs.min(), xs.max(), ys.min(), ys.max()
+
+
+def get_random_crop_coordinates(crop_scale_range, image_size):
+    rand_number = random.random()
+    rand_number *= (crop_scale_range[1] - crop_scale_range[0])
+    rand_number += crop_scale_range[0]
+    crop_size = int(rand_number * image_size)
+    if crop_size != image_size:
+        x_start = random.randint(0, image_size-crop_size)
+        y_start = random.randint(0, image_size-crop_size)
+    else:
+        x_start = 0
+        y_start = 0
+    return x_start, x_start+crop_size, y_start, y_start+crop_size

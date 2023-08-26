@@ -250,6 +250,12 @@ class StableDiffusion(nn.Module):
         sd_cross_attention_maps1, sd_cross_attention_maps2, sd_self_attention_maps = self.get_attention_map(
             self.attention_maps, output_size=attention_output_size, token_ids=token_ids, average_layers=average_layers, train=train, apply_softmax=apply_softmax)
         self.attention_maps = {}
+        
+        noise_pred_uncond, noise_pred_text = noise_pred_.chunk(2)
+        noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
+        loss = F.mse_loss(noise_pred, noise, reduction="none").mean([1, 2, 3]).mean()
+        
+        
         # if not self.partial_run:
         #     # perform guidance (high scale from paper!)
         #     noise_pred_uncond, noise_pred_text = noise_pred_.chunk(2)
@@ -270,7 +276,7 @@ class StableDiffusion(nn.Module):
         #     # torch.cuda.synchronize(); print(f'[TIME] guiding: backward {time.time() - _t:.4f}s')
         #
         #     return loss, sd_cross_attention_maps1, sd_cross_attention_maps2, sd_self_attention_maps
-        return 0, sd_cross_attention_maps1, sd_cross_attention_maps2, sd_self_attention_maps
+        return loss, sd_cross_attention_maps1, sd_cross_attention_maps2, sd_self_attention_maps
 
     def produce_latents(self, text_embeddings, height=512, width=512, num_inference_steps=50, guidance_scale=7.5,
                         latents=None):

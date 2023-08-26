@@ -13,9 +13,12 @@ import cv2
 import numpy as np
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
+from src.utils import get_random_crop_coordinates
 
 
 part_names_mapping = {
+    "skin": "skin",
+    "hair": "hair",
     "r_eye": "eye",
     "l_eye": "eye",
     "mouth": "mouth",
@@ -26,11 +29,11 @@ part_names_mapping = {
     "l_ear": "ear",
     "u_lip": "mouth",
     "l_lip": "mouth",
-    "skin": "skin",
     "neck": "neck",
     "cloth": "cloth",
-    "hair": "hair",
 }
+
+parts_names = ["skin", "hair", "eye", "mouth", "nose", "brow", "ear", "neck", "cloth"]
 
 part_names_mapping_1 = {
     "r_eye": "r_eye",
@@ -66,8 +69,9 @@ class CelebaHQDataset(Dataset):
         self.mask_size = mask_size
         self.return_whole = False
         if self.parts_to_return[1] == 'whole':
-            self.parts_to_return = ['background'] + list(part_names_mapping.values())
+            self.parts_to_return = ['background'] + parts_names
             self.return_whole = True
+        self.current_part_idx = 0
         mapping_dict = {}
         with open(idx_mapping_file) as file:
             mappings = file.readlines()[1:]
@@ -137,14 +141,20 @@ class CelebaHQDataset(Dataset):
                 ToTensorV2()
             ])
         else:
-            self.train_transform = A.Compose([
+            self.train_transform_1 = A.Compose([
                 A.Resize(512, 512),
                 A.HorizontalFlip(),
                 # A.RandomScale((0.5, 2), always_apply=True),
-                A.GaussianBlur(blur_limit=(1, 31)),
-                A.RandomResizedCrop(512, 512, (0.3, 1)),
-                A.Rotate((-10, 10), border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0),
-                ToTensorV2()
+                A.GaussianBlur(blur_limit=(1, 11)),
+            ])
+
+            self.train_transform_2 = A.Compose([
+                # A.RandomResizedCrop(512, 512, (0.4, 1), ratio=(1., 1.)),
+                A.Resize(512, 512),
+                A.CLAHE(),
+                A.ColorJitter(brightness=0.5, contrast=0.2, saturation=0.1, hue=0.1),
+                A.Rotate((-30, 30), border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0),
+                ToTensorV2(),
             ])
             self.test_transform = A.Compose([
                 A.Resize(512, 512),
@@ -184,23 +194,29 @@ class CelebaHQDataset(Dataset):
         if self.return_whole:
             final_mask = np.where(final_mask>0, 1., 0.)
         if self.train:
-            image = transforms.functional.resize(image, 512)  # because the original image size is 1024 but the mask is 512
-            original_mask_size = np.where(final_mask > 0, 1, 0).sum()
+            result = self.train_transform_1(image=np.array(image), mask=final_mask)
+            image = result['image']
+            final_mask = result['mask']
+            original_mask_size = np.where(final_mask == self.current_part_idx+1, 1, 0).sum()
             mask_is_included = False
             while not mask_is_included:
-                result = self.train_transform(image=np.array(image), mask=final_mask)
+                x_start, x_end, y_start, y_end = get_random_crop_coordinates((0.6, 1), 512)
+                aux_final_mask = final_mask[y_start:y_end, x_start:x_end]
                 # mask = torch.as_tensor(result["mask"])
-                if np.where(result["mask"] > 0, 1, 0).sum() / original_mask_size > 0.3:
+                if original_mask_size == 0 or np.where(aux_final_mask == self.current_part_idx+1, 1, 0).sum() / original_mask_size > 0.3:
                     mask_is_included = True
                     
-            image = result["image"]
-            mask = torch.as_tensor(result["mask"])
+            image = image[y_start:y_end, x_start:x_end]
+            result = self.train_transform_2(image=image, mask=aux_final_mask)
+            mask, image = result['mask'], result['image']
             # result = self.train_transform(image=np.array(image), mask=final_mask)
             # image = result["image"]
             # mask = torch.as_tensor(result["mask"])
             mask = \
                 torch.nn.functional.interpolate(mask[None, None, ...].type(torch.float), self.mask_size,
                                                 mode="nearest")[0, 0]
+            self.current_part_idx += 1
+            self.current_part_idx = self.current_part_idx % len(self.parts_to_return[1:])
             return image / 255, mask
         image = transforms.functional.resize(image, 512)  # because the original image size is 1024 but the mask is 512
         result = self.test_transform(image=np.array(image), mask=final_mask)

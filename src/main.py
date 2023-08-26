@@ -24,6 +24,7 @@ def main():
             src_mask_dirs=config.src_mask_paths,
             batch_size=config.batch_size,
             mask_size=config.mask_size,
+            num_parts=len(config.part_names)-1,
         )
     elif config.dataset == "pascal":
         dm = PascalVOCPartDataModule(

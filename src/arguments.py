@@ -103,6 +103,9 @@ def add_train_args(parser):
     parser.add_argument('--skip_zooming', action='store_true', default=False)
     parser.add_argument('--t', type=int, default=20)
     parser.add_argument('--accumulate_grad_batches', type=int, default=4)
+    parser.add_argument('--class_weights', nargs="+", type=float)
+    parser.add_argument('--ce_weighting', type=str, default='constant')
+    parser.add_argument('--sd_loss_coef', type=float, default=0)
     return parser
 
 def add_test_args(parser):
