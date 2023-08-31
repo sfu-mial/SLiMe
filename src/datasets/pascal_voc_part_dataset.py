@@ -127,7 +127,9 @@ class PascalVOCPartDataset(Dataset):
             final_min_crop_size=512,
             single_object=True,
             adjust_bounding_box=False,
-            zero_pad_test_output=False
+            zero_pad_test_output=False,
+            keep_aspect_ratio=False,
+            min_crop_ratio=0.5,
     ):
         super().__init__()
         self.ann_file_base_dir = ann_file_base_dir
@@ -150,6 +152,8 @@ class PascalVOCPartDataset(Dataset):
         self.final_min_crop_size = final_min_crop_size
         self.single_object = single_object
         self.zero_pad_test_output = zero_pad_test_output
+        self.keep_aspect_ratio = keep_aspect_ratio
+        self.min_crop_ratio = min_crop_ratio
         self.current_part_idx = 0
         counter_ = 0
         with open(data_file_ids_file) as file:
@@ -309,13 +313,34 @@ class PascalVOCPartDataset(Dataset):
                 ToTensorV2()
             ])
         else:
-            self.train_transform_1 = A.Compose([
-                A.Resize(512, 512),
-                A.HorizontalFlip(),
-                # A.RandomScale((0.5, 2), always_apply=True),
-                A.GaussianBlur(blur_limit=(1, 15)),
-            ])
-
+            if self.keep_aspect_ratio:
+                self.train_transform_1 = A.Compose([
+                    A.SmallestMaxSize(512),
+                    # A.Resize(512, 512),
+                    A.HorizontalFlip(),
+                    # A.RandomScale((0.5, 2), always_apply=True),
+                    A.GaussianBlur(blur_limit=(1, 15)),
+                ])
+                self.test_transform = A.Compose([
+                    A.SmallestMaxSize(512),
+                    # A.Resize(512, 512),
+                    ToTensorV2()
+                ])
+                self.test_transform_1 = A.Compose([
+                    A.Resize(512, 512),
+                    ToTensorV2()
+                ])
+            else:
+                self.train_transform_1 = A.Compose([
+                    A.Resize(512, 512),
+                    A.HorizontalFlip(),
+                    # A.RandomScale((0.5, 2), always_apply=True),
+                    A.GaussianBlur(blur_limit=(1, 15)),
+                ])
+                self.test_transform = A.Compose([
+                    A.Resize(512, 512),
+                    ToTensorV2()
+                ])
             self.train_transform_2 = A.Compose([
                 # A.RandomResizedCrop(512, 512, (0.4, 1), ratio=(1., 1.)),
                 A.Resize(512, 512),
@@ -336,11 +361,7 @@ class PascalVOCPartDataset(Dataset):
             #     A.Rotate((-10, 10), border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0),
             #     ToTensorV2()
             # ])
-            self.test_transform = A.Compose([
-                # A.SmallestMaxSize(512),
-                A.Resize(512, 512),
-                ToTensorV2()
-            ])
+            
 
     def __getitem__(self, idx):
         data = self.data[idx]
@@ -411,7 +432,7 @@ class PascalVOCPartDataset(Dataset):
             original_mask_size = np.where(mask == self.current_part_idx+1, 1, 0).sum()
             # original_mask_size = np.where(mask > 0, 1, 0).sum()
             while not mask_is_included:
-                x_start, x_end, y_start, y_end = get_random_crop_coordinates((0.5, 1), 512)
+                x_start, x_end, y_start, y_end = get_random_crop_coordinates((self.min_crop_ratio, 1), image.shape[1], image.shape[0])
                 aux_mask = mask[y_start:y_end, x_start:x_end]
                 if original_mask_size == 0 or np.where(aux_mask == self.current_part_idx+1, 1, 0).sum() / original_mask_size > 0.3:
                     mask_is_included = True
@@ -431,6 +452,8 @@ class PascalVOCPartDataset(Dataset):
             return image/255, mask
         else:
             result = self.test_transform(image=np.array(image), mask=mask)
+            if max(result["mask"].shape) > 1024:
+                result = self.test_transform_1(image=np.array(image), mask=mask)
             image = result["image"]
             mask = torch.as_tensor(result["mask"])
             return image/255, mask
@@ -460,7 +483,9 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
             final_min_crop_size: int = 512,
             single_object: bool = True,
             adjust_bounding_box: bool = False,
-            zero_pad_test_output: bool = False
+            zero_pad_test_output: bool = False,
+            keep_aspect_ratio: bool = False,
+            min_crop_ratio: float = 0.5,
     ):
         super().__init__()
         self.ann_file_base_dir = ann_file_base_dir
@@ -482,6 +507,8 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
         self.single_object = single_object
         self.adjust_bounding_box = adjust_bounding_box
         self.zero_pad_test_output = zero_pad_test_output
+        self.keep_aspect_ratio = keep_aspect_ratio
+        self.min_crop_ratio = min_crop_ratio
 
     def setup(self, stage: str):
         if stage == "fit":
@@ -502,6 +529,8 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
                 final_min_crop_size=self.final_min_crop_size,
                 single_object=self.single_object,
                 adjust_bounding_box=self.adjust_bounding_box,
+                keep_aspect_ratio=self.keep_aspect_ratio,
+                min_crop_ratio=self.min_crop_ratio,
             )
             self.val_dataset = PascalVOCPartDataset(
                 ann_file_base_dir=self.ann_file_base_dir,
@@ -519,6 +548,7 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
                 single_object=self.single_object,
                 adjust_bounding_box=self.adjust_bounding_box,
                 zero_pad_test_output=self.zero_pad_test_output,
+                keep_aspect_ratio=self.keep_aspect_ratio,
             )
         elif stage == "test":
             if self.object_name == 'horse':
@@ -537,6 +567,7 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
                     single_object=self.single_object,
                     adjust_bounding_box=self.adjust_bounding_box,
                     zero_pad_test_output=self.zero_pad_test_output,
+                    keep_aspect_ratio=self.keep_aspect_ratio,
                 )
             elif self.object_name == 'car':
                 if self.fill_background_with_black:

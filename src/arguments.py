@@ -48,6 +48,7 @@ def add_base_args(parser):
     parser.add_argument('--objective_to_optimize', type=str, default='text_embedding')
     parser.add_argument('--log_images', action='store_true', default=False)
     parser.add_argument('--text_prompt', type=str, default='')
+    parser.add_argument('--argmax_ca_before_sa', action='store_true', default=False)
     return parser
     
 def add_sample_dataset_args(parser):
@@ -75,6 +76,7 @@ def add_pascal_dataset_args(parser):
     parser.add_argument('--ann_file_base_dir', type=str)
     parser.add_argument('--images_base_dir', type=str)
     parser.add_argument('--car_test_data_dir', type=str, default='/home/aka225/scratch/data/Car_TestSet')
+    parser.add_argument('--keep_aspect_ratio', action='store_true', default=False)
     return parser
 
 def add_celeba_dataset_args(parser):
@@ -84,6 +86,7 @@ def add_celeba_dataset_args(parser):
     parser.add_argument('--test_file_names_file_path', type=str)
     parser.add_argument('--train_file_names_file_path', type=str)
     parser.add_argument('--val_file_names_file_path', type=str)
+    parser.add_argument('--human_version', type=str, default="10")
     return parser
 
 def add_paper_test_dataset_args(parser):
@@ -94,7 +97,7 @@ def add_paper_test_dataset_args(parser):
 def add_train_args(parser):
     parser.add_argument('--optimizer', type=str, default='Adam')
     parser.add_argument('--epochs', type=int, default=40)
-    parser.add_argument('--self_attention_loss_coef', type=int, default=1)
+    parser.add_argument('--self_attention_loss_coef', type=float, default=1.)
     parser.add_argument('--lr', type=float, default=0.1)
     parser.add_argument('--mask_size', type=int, default=128)
     parser.add_argument('--val_data_ids', nargs='+', type=int)
@@ -102,10 +105,11 @@ def add_train_args(parser):
     parser.add_argument('--use_all_tokens_for_training', action='store_true', default=False)
     parser.add_argument('--skip_zooming', action='store_true', default=False)
     parser.add_argument('--t', type=int, default=20)
-    parser.add_argument('--accumulate_grad_batches', type=int, default=4)
+    parser.add_argument('--accumulate_grad_batches', type=int, default=1)
     parser.add_argument('--class_weights', nargs="+", type=float)
     parser.add_argument('--ce_weighting', type=str, default='constant')
     parser.add_argument('--sd_loss_coef', type=float, default=0)
+    parser.add_argument('--min_crop_ratio', type=float, default=0.8)
     return parser
 
 def add_test_args(parser):

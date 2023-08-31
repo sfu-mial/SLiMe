@@ -10,12 +10,13 @@ import numpy as np
 from src.utils import get_random_crop_coordinates
 
 class SampleDataset(Dataset):
-    def __init__(self, image_dirs, mask_dirs, train=True, mask_size=256, num_parts=1):
+    def __init__(self, image_dirs, mask_dirs, train=True, mask_size=256, num_parts=1, min_crop_ratio=0.5):
         self.image_dirs = image_dirs
         self.mask_dirs = mask_dirs
         self.train = train
         self.mask_size = mask_size
         self.num_parts = num_parts
+        self.min_crop_ratio = min_crop_ratio
         self.train_transform_1 = A.Compose([
             A.Resize(512, 512),
             A.HorizontalFlip(),
@@ -73,7 +74,7 @@ class SampleDataset(Dataset):
             mask_is_included = False
             # original_mask_size = np.where(mask > 0, 1, 0).sum()
             while not mask_is_included:
-                x_start, x_end, y_start, y_end = get_random_crop_coordinates((0.5, 1), 512)
+                x_start, x_end, y_start, y_end = get_random_crop_coordinates((self.min_crop_ratio, 1), 512, 512)
                 aux_mask = mask[y_start:y_end, x_start:x_end]
                 # mask = torch.as_tensor(result["mask"])
                 if original_mask_size == 0 or np.where(aux_mask == self.current_part_idx+1, 1, 0).sum() / original_mask_size > 0.3:
@@ -169,6 +170,7 @@ class SampleDataModule(pl.LightningDataModule):
             batch_size: int = 1,
             mask_size: int = 256,
             num_parts: int = 1,
+            min_crop_ratio: float = 0.5,
     ):
         super().__init__()
         self.src_image_dirs = src_image_dirs
@@ -177,6 +179,7 @@ class SampleDataModule(pl.LightningDataModule):
         self.batch_size = batch_size
         self.mask_size = mask_size
         self.num_parts = num_parts
+        self.min_crop_ratio = min_crop_ratio
 
     def setup(self, stage: str):
         if stage == 'fit':
@@ -186,18 +189,19 @@ class SampleDataModule(pl.LightningDataModule):
                 train=True,
                 mask_size=self.mask_size,
                 num_parts=self.num_parts,
+                min_crop_ratio=self.min_crop_ratio,
             )
             self.val_dataset = SampleDataset(
                 image_dirs=self.src_image_dirs[len(self.src_image_dirs)//2:],
                 mask_dirs=self.src_mask_dirs[len(self.src_mask_dirs)//2:],
                 train=False,
             )
-        elif stage == 'test':
-            self.test_dataset = SampleDataset(
-                image_dirs=self.target_image_dir,
-                mask_dirs=None,
-                train=False,
-            )
+        # elif stage == 'test':
+        #     self.test_dataset = SampleDataset(
+        #         image_dirs=self.target_image_dir,
+        #         mask_dirs=None,
+        #         train=False,
+        #     )
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=8, shuffle=True)
@@ -205,5 +209,5 @@ class SampleDataModule(pl.LightningDataModule):
     def val_dataloader(self):
         return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=8, shuffle=False)
     
-    def test_dataloader(self):
-        return DataLoader(self.test_dataset, batch_size=self.batch_size, num_workers=8, shuffle=False)
+    # def test_dataloader(self):
+    #     return DataLoader(self.test_dataset, batch_size=self.batch_size, num_workers=8, shuffle=False)

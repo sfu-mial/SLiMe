@@ -25,6 +25,7 @@ def main():
             batch_size=config.batch_size,
             mask_size=config.mask_size,
             num_parts=len(config.part_names)-1,
+            min_crop_ratio=config.min_crop_ratio,
         )
     elif config.dataset == "pascal":
         dm = PascalVOCPartDataModule(
@@ -47,6 +48,8 @@ def main():
             single_object=config.single_object,
             adjust_bounding_box=config.adjust_bounding_box,
             zero_pad_test_output=config.zero_pad_test_output,
+            keep_aspect_ratio=config.keep_aspect_ratio,
+            min_crop_ratio=config.min_crop_ratio,
         )
     elif config.dataset == "celeba-hq":
         dm = CelebaHQDataModule(
@@ -56,11 +59,13 @@ def main():
             test_file_names_file_path=config.test_file_names_file_path,
             train_file_names_file_path=config.train_file_names_file_path,
             val_file_names_file_path=config.val_file_names_file_path,
-            part_names=config.part_names,
+            parts_to_return=config.part_names[1:],
             batch_size=config.batch_size,
             mask_size=config.mask_size,
             train_data_ids=config.train_data_ids,
             val_data_ids=config.val_data_ids,
+            min_crop_ratio=config.min_crop_ratio,
+            version=config.human_version,
         )
     elif config.dataset == "paper_test":
         dm = PaperTestSampleDataModule(
@@ -73,15 +78,17 @@ def main():
         dm = ADE20KDataModule(
             train_data_dir=config.train_data_dir,
             test_data_dir=config.test_data_dir,
-            object_name=config.object_name,
-            mask_size=config.mask_size
+            object_names=config.object_name,
+            mask_size=config.mask_size,
+            min_crop_ratio=config.min_crop_ratio,
         )
     elif config.dataset == 'cat15':
         dm = CAT15DataModule(
             train_data_dir=config.train_data_dir,
             test_data_dir=config.test_data_dir,
             part_name=config.part_names[0],
-            mask_size=config.mask_size
+            mask_size=config.mask_size,
+            min_crop_ratio=config.min_crop_ratio,
         )
     model = CoSegmenterTrainer(config=config)
     if isinstance(config.gpu_id, int):
@@ -104,7 +111,8 @@ def main():
     )
     if config.train:
         trainer.fit(model=model, datamodule=dm)
-        trainer.test(model=model, datamodule=dm)
+        if not config.dataset == "sample":
+            trainer.test(model=model, datamodule=dm)
     else:
         trainer.test(model=model, datamodule=dm)
 

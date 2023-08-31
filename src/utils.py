@@ -99,14 +99,14 @@ def get_bbox_data(mask):
     return xs.min(), xs.max(), ys.min(), ys.max()
 
 
-def get_random_crop_coordinates(crop_scale_range, image_size):
+def get_random_crop_coordinates(crop_scale_range, image_width, image_height):
     rand_number = random.random()
     rand_number *= (crop_scale_range[1] - crop_scale_range[0])
     rand_number += crop_scale_range[0]
-    crop_size = int(rand_number * image_size)
-    if crop_size != image_size:
-        x_start = random.randint(0, image_size-crop_size)
-        y_start = random.randint(0, image_size-crop_size)
+    crop_size = int(rand_number * min(image_width, image_height))
+    if crop_size != min(image_width, image_height):
+        x_start = random.randint(0, image_width-crop_size)
+        y_start = random.randint(0, image_height-crop_size)
     else:
         x_start = 0
         y_start = 0
