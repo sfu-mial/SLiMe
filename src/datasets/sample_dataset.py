@@ -20,12 +20,10 @@ class SampleDataset(Dataset):
         self.train_transform_1 = A.Compose([
             A.Resize(512, 512),
             A.HorizontalFlip(),
-            # A.RandomScale((0.5, 2), always_apply=True),
             A.GaussianBlur(blur_limit=(1, 21)),
         ])
 
         self.train_transform_2 = A.Compose([
-            # A.RandomResizedCrop(512, 512, (0.4, 1), ratio=(1., 1.)),
             A.Resize(512, 512),
             A.CLAHE(),
             A.ColorJitter(brightness=0.5, contrast=0.2, saturation=0.1, hue=0.1),
@@ -33,22 +31,7 @@ class SampleDataset(Dataset):
             ToTensorV2(),
         ])
         self.current_part_idx = 0
-        # self.train_transform = A.Compose([
-        #     A.Resize(512, 512),
-        #     # A.LongestMaxSize(512),
-        #     # A.PadIfNeeded(512, 512, border_mode=cv2.BORDER_CONSTANT, value=0,
-        #     #               mask_value=0),
-        #     A.HorizontalFlip(),
-        #     # A.RandomScale((0.5, 2), always_apply=True),
-        #     A.GaussianBlur(blur_limit=(1, 11)),
-        #     A.RandomResizedCrop(512, 512, (0.2, 1.4)),
-        #     A.CLAHE(),
-        #     A.ColorJitter(brightness=0.5, contrast=0.2, saturation=0.1, hue=0.1),
-        #     A.Rotate((-30, 30), border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0),
-        #     ToTensorV2()
-        # ])
         self.test_transform = A.Compose([
-            # A.SmallestMaxSize(512),
             A.Resize(512, 512),
             ToTensorV2()
         ])
@@ -59,53 +42,29 @@ class SampleDataset(Dataset):
             mask = np.array(Image.open(self.mask_dirs[idx]))
             if len(mask.shape) == 3:
                 mask = mask[:, :, 0]
-            # if len(self.mask_dirs) // len(self.image_dirs) > 1:
-            #     for i in range(1, len(self.mask_dirs)//len(self.image_dirs)):
-            #         mask1 = np.where(np.array(Image.open(self.mask_dirs[idx+i])) / 255 > 0.5, 1, 0)
-            #         if len(mask1.shape) == 3:
-            #             mask1 = mask1[:, :, 0]
-            #         mask = np.where(mask1 > 0, i+1, mask)
-            # values, counts = np.unique(mask, return_counts=True)
-            
             result = self.train_transform_1(image=np.array(image), mask=mask)
             image = result['image']
             mask = result['mask']
             original_mask_size = np.where(mask == self.current_part_idx+1, 1, 0).sum()
             mask_is_included = False
-            # original_mask_size = np.where(mask > 0, 1, 0).sum()
             while not mask_is_included:
                 x_start, x_end, y_start, y_end = get_random_crop_coordinates((self.min_crop_ratio, 1), 512, 512)
                 aux_mask = mask[y_start:y_end, x_start:x_end]
-                # mask = torch.as_tensor(result["mask"])
                 if original_mask_size == 0 or np.where(aux_mask == self.current_part_idx+1, 1, 0).sum() / original_mask_size > 0.3:
                     mask_is_included = True
-                
-                # result = self.train_transform(image=np.array(image), mask=mask)
-                # # mask = torch.as_tensor(result["mask"])
-                # if np.where(result["mask"] > 0, 1, 0).sum() / original_mask_size > 0.2:
-                #     mask_is_included = True
             image = image[y_start:y_end, x_start:x_end]
             result = self.train_transform_2(image=image, mask=aux_mask)
             mask, image = result['mask'], result['image']
-            
-            # image = result["image"]
-            # mask = torch.as_tensor(result["mask"])
-            mask = \
+            small_mask = \
                 torch.nn.functional.interpolate(mask[None, None, ...].type(torch.float), self.mask_size, mode="nearest")[0, 0]
             self.current_part_idx += 1
             self.current_part_idx = self.current_part_idx % self.num_parts
-            return image/255, mask
+            return image / 255, mask, small_mask
         else:
             if self.mask_dirs is not None:
                 mask = np.array(Image.open(self.mask_dirs[idx]))
                 if len(mask.shape) == 3:
                     mask = mask[:, :, 0]
-                # if len(self.mask_dirs) > 2:
-                #     for i in range(1, len(self.mask_dirs)):
-                #         mask1 = np.where(np.array(Image.open(self.mask_dirs[idx+i])) / 255 > 0.5, 1, 0)
-                #         if len(mask1.shape) == 3:
-                #             mask1 = mask1[:, :, 0]
-                #         mask = np.where(mask1 > 0, i + 1, mask)
                 result = self.test_transform(image=np.array(image), mask=mask)
                 mask = result['mask']
             else:
@@ -113,49 +72,6 @@ class SampleDataset(Dataset):
                 mask = 0
             image = result["image"]
             return image/255, mask
-        # # w, h = image.size
-        # # image = transforms.functional.center_crop(image, (min(w, h), min(w, h)))
-        # image = transforms.functional.resize(image, size=(512, 512))
-        # image = transforms.functional.to_tensor(image)
-        # if self.train:
-        #     mask = Image.open(self.mask_dirs[idx])
-        #     # w, h = mask.size
-        #     # mask = transforms.functional.center_crop(mask, (min(w, h), min(w, h)))
-        #     mask = transforms.functional.resize(mask, size=(512, 512))
-        #     mask = transforms.functional.to_tensor(mask).sum(dim=0)
-        #     mask = torch.where(mask >= 0.5, 1., 0.)
-        #     rotation_degree = transforms.RandomRotation.get_params([0, 45])
-        #     image = transforms.functional.rotate(image, rotation_degree)
-        #     mask = transforms.functional.rotate(mask[None, ...], rotation_degree)[0]
-        #     coords = []
-        #     if self.num_crops > 1:
-        #         x_start, x_end, y_start, y_end, crop_size = get_square_cropping_coords(mask)
-        #         # coords.append([y_start, y_end, x_start, x_end])
-        #         for square_size in torch.linspace(crop_size, 512, self.num_crops + 1)[1:-1]:
-        #             x_start, x_end, y_start, y_end, crop_size = get_square_cropping_coords(mask,
-        #                                                                                    square_size=int(square_size))
-        #             coords.append([y_start, y_end, x_start, x_end])
-        #     coords.append([0, 512, 0, 512])
-        #     random_idx = random.randint(0, self.num_crops-1)
-        #     y_start, y_end, x_start, x_end = coords[random_idx]
-        #     cropped_mask = mask[y_start:y_end, x_start:x_end]
-        #     cropped_mask = torch.nn.functional.interpolate(cropped_mask[None, None, ...], size=512, mode="nearest")[0, 0]
-        #     cropped_image = image[:, y_start:y_end, x_start:x_end]
-        #     cropped_image = torch.nn.functional.interpolate(cropped_image[None, ...], size=512, mode="bilinear")[0]
-        #     mask_in_crop = False
-        #     while not mask_in_crop:
-        #         crop_size = int((self.final_min_crop_size + torch.rand(1) * (512-self.final_min_crop_size)).item())
-        #         y, x, h, w = transforms.RandomCrop.get_params(cropped_image, output_size=(crop_size, crop_size))
-        #         final_cropped_mask = cropped_mask[y:y+h, x:x+w]
-        #         if torch.any(final_cropped_mask == 1):
-        #             mask_in_crop = True
-        #     final_cropped_image = cropped_image[:, y:y+h, x:x+w]
-        #     final_cropped_image = torch.nn.functional.interpolate(final_cropped_image[None, ...], size=512, mode="bilinear")[0]
-        #     final_cropped_mask = torch.nn.functional.interpolate(final_cropped_mask[None, None, ...], size=self.mask_size, mode="nearest")[0, 0]
-
-        #     return final_cropped_image, final_cropped_mask
-        # else:
-        #     return image, 0
 
     def __len__(self):
         return len(self.image_dirs)

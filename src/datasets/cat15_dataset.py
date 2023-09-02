@@ -56,9 +56,10 @@ class CAT15Dataset(Dataset):
         image = result["image"]
         mask = result["mask"]
         if self.train:
-            mask = \
+            small_mask = \
                 torch.nn.functional.interpolate(mask[None, None, ...].type(torch.float), self.mask_size,
                                                 mode="nearest")[0, 0]
+            return image / 255, mask, small_mask
         return image / 255, mask
 
     def __len__(self):

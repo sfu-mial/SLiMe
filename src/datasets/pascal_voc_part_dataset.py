@@ -431,11 +431,11 @@ class PascalVOCPartDataset(Dataset):
             mask, image = result['mask'], result['image']    
             # image = result["image"]
             # mask = torch.as_tensor(result["mask"])
-            mask = \
+            small_mask = \
                 torch.nn.functional.interpolate(mask[None, None, ...].type(torch.float), self.mask_size, mode="nearest")[0, 0]
             self.current_part_idx += 1
             self.current_part_idx = self.current_part_idx % len(self.parts_to_return[1:])
-            return image/255, mask
+            return image / 255, mask, small_mask
         else:
             result = self.test_transform(image=np.array(image), mask=mask)
             if max(result["mask"].shape) > 1024:

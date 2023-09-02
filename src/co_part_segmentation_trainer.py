@@ -26,9 +26,10 @@ class CoSegmenterTrainer(pl.LightningModule):
             self.generate_noise = False
         else:
             self.generate_noise = True
-        self.val_epoch_iou = 0
+        self.max_train_iou = 0
         self.max_val_iou = 0
-        self.ious = []
+        self.train_ious = []
+        self.val_ious = []
         if self.config.objective_to_optimize == "translator":
             self.translator = torch.nn.Sequential(
                 torch.nn.Linear(1024, 1024)
@@ -67,9 +68,10 @@ class CoSegmenterTrainer(pl.LightningModule):
 
     def on_train_epoch_start(self) -> None:
         self.generate_noise = True
+        self.train_ious = []
 
     def training_step(self, batch, batch_idx):
-        src_images, mask = batch
+        src_images, large_mask, mask = batch
         if self.config.ce_weighting == 'adaptive':
             num_pixels = torch.zeros(len(self.config.parts_to_return), dtype=torch.int64)
             values, counts = torch.unique(mask, return_counts=True)
@@ -80,6 +82,7 @@ class CoSegmenterTrainer(pl.LightningModule):
         elif self.config.ce_weighting == 'constant':
             pixel_weights = torch.tensor([1, 1, 1, 1, 1, 1, 1, 1, 1, 1], dtype=torch.float)
         mask = mask[0]
+        large_mask = large_mask[0]
         # t = torch.randint(low=10, high=160, size=(1,)).item()
         # _, text_embeddings = self.stable_diffusion.get_text_embeds("", "")
         if self.config.objective_to_optimize == "text_embedding":
@@ -118,6 +121,31 @@ class CoSegmenterTrainer(pl.LightningModule):
         else:
             loss = loss1 + self.config.sd_loss_coef * sd_loss
 
+        self.test_t_embedding = t_embedding
+        if self.config.masking == 'patched_masking':
+            final_mask = self.get_patched_masks(src_images,
+                                                self.config.crop_size,
+                                                self.config.num_crops_per_side,
+                                                self.config.crop_threshold
+                                                )
+        elif self.config.masking == 'zoomed_masking':
+            final_mask = self.zoom_and_mask(src_images,
+                                            self.config.crop_threshold,
+                                            batch_idx)
+        
+        ious = []
+        for idx, part_name in enumerate(self.config.part_names):
+            part_mask = torch.where(large_mask.cpu() == idx, 1, 0).type(torch.uint8)
+            if torch.all(part_mask == 0):
+                continue
+            iou = calculate_iou(torch.where(final_mask == idx, 1, 0).type(torch.uint8),
+                                part_mask).cpu()
+            ious.append(iou)
+            self.log(f"train {part_name} iou", iou, on_step=True, sync_dist=True)
+        mean_iou = sum(ious) / len(ious)
+        self.train_ious.append(mean_iou)
+        self.log("train mean iou", mean_iou, on_step=True, sync_dist=True)
+
         self.log("sd_loss", sd_loss.detach().cpu(), on_step=True, sync_dist=True)
         self.log("loss1", loss1.detach().cpu(), on_step=True, sync_dist=True)
         self.log("loss", loss.detach().cpu(), on_step=True, sync_dist=True)
@@ -136,6 +164,23 @@ class CoSegmenterTrainer(pl.LightningModule):
             self.counter += 1
 
         return loss
+
+    def on_train_epoch_end(self):
+        epoch_mean_iou = sum(self.train_ious)/len(self.train_ious)
+        if epoch_mean_iou >= self.max_train_iou:
+            self.max_train_iou = epoch_mean_iou
+            if self.config.objective_to_optimize == "text_embedding":
+                for i, embedding in enumerate(self.embeddings_to_optimize):
+                    torch.save(embedding,
+                            os.path.join(self.checkpoint_dir, f"embedding_{i}.pth"))
+                # torch.save(self.token_0,
+                #         os.path.join(self.checkpoint_dir, "token_0.pth"))
+            elif self.config.objective_to_optimize == "translator":
+                torch.save(self.translator.state_dict(),
+                        os.path.join(self.checkpoint_dir, "translator.pth"))
+            torch.save(self.stable_diffusion.noise.cpu(),
+                       os.path.join(self.checkpoint_dir, "noise.pth"))
+        gc.collect()
 
     # def get_patched_masks(self, image, crop_size, num_crops_per_side, threshold):
     #     crops_coords = get_crops_coords(image.shape[2:], crop_size,
@@ -340,7 +385,7 @@ class CoSegmenterTrainer(pl.LightningModule):
             self.test_t_embedding = torch.cat([self.uncond_embedding, self.text_embedding+self.translator(self.text_embedding)])
 
     def on_validation_epoch_start(self):
-        self.ious = []
+        self.val_ious = []
 
     def validation_step(self, batch, batch_idx):
         image, mask = batch
@@ -374,26 +419,26 @@ class CoSegmenterTrainer(pl.LightningModule):
             ious.append(iou)
             self.log(f"val {part_name} iou", iou, on_step=True, sync_dist=True)
         mean_iou = sum(ious) / len(ious)
-        self.ious.append(mean_iou)
+        self.val_ious.append(mean_iou)
         self.log("val mean iou", mean_iou, on_step=True, sync_dist=True)
         return torch.tensor(0.)
     
-    def on_validation_epoch_end(self):
-        epoch_mean_iou = sum(self.ious)/len(self.ious)
-        if epoch_mean_iou >= self.max_val_iou:
-            self.max_val_iou = epoch_mean_iou
-            if self.config.objective_to_optimize == "text_embedding":
-                for i, embedding in enumerate(self.embeddings_to_optimize):
-                    torch.save(embedding,
-                            os.path.join(self.checkpoint_dir, f"embedding_{i}.pth"))
-                # torch.save(self.token_0,
-                #         os.path.join(self.checkpoint_dir, "token_0.pth"))
-            elif self.config.objective_to_optimize == "translator":
-                torch.save(self.translator.state_dict(),
-                        os.path.join(self.checkpoint_dir, "translator.pth"))
-            torch.save(self.stable_diffusion.noise.cpu(),
-                       os.path.join(self.checkpoint_dir, "noise.pth"))
-        gc.collect()
+    # def on_validation_epoch_end(self):
+    #     epoch_mean_iou = sum(self.ious)/len(self.ious)
+    #     if epoch_mean_iou >= self.max_val_iou:
+    #         self.max_val_iou = epoch_mean_iou
+    #         if self.config.objective_to_optimize == "text_embedding":
+    #             for i, embedding in enumerate(self.embeddings_to_optimize):
+    #                 torch.save(embedding,
+    #                         os.path.join(self.checkpoint_dir, f"embedding_{i}.pth"))
+    #             # torch.save(self.token_0,
+    #             #         os.path.join(self.checkpoint_dir, "token_0.pth"))
+    #         elif self.config.objective_to_optimize == "translator":
+    #             torch.save(self.translator.state_dict(),
+    #                     os.path.join(self.checkpoint_dir, "translator.pth"))
+    #         torch.save(self.stable_diffusion.noise.cpu(),
+    #                    os.path.join(self.checkpoint_dir, "noise.pth"))
+    #     gc.collect()
 
     def on_test_start(self) -> None:
         if self.config.second_gpu_id is None:
@@ -420,9 +465,9 @@ class CoSegmenterTrainer(pl.LightningModule):
         
         noise = torch.load(os.path.join(self.checkpoint_dir, "noise.pth"))
         self.stable_diffusion.noise = noise.to(self.stable_diffusion.device)
-        self.ious = {}
-        for part_name in self.config.parts_to_return:
-            self.ious[part_name] = []
+        # self.ious = {}
+        # for part_name in self.config.parts_to_return:
+        #     self.ious[part_name] = []
 
     def test_step(self, batch, batch_idx):
         image, mask = batch
@@ -464,7 +509,7 @@ class CoSegmenterTrainer(pl.LightningModule):
                     continue
                 iou = calculate_iou(torch.where(final_mask == idx, 1, 0).type(torch.uint8),
                                     part_mask)
-                self.ious[part_name].append(iou.cpu())
+                # self.ious[part_name].append(iou.cpu())
                 self.log(f"test {part_name} iou", iou, on_step=True, sync_dist=True)
 
         return torch.tensor(0.)

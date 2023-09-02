@@ -209,10 +209,10 @@ class CelebaHQDataset(Dataset):
             image = image[y_start:y_end, x_start:x_end]
             result = self.train_transform_2(image=image, mask=final_mask)
             mask, image = result['mask'], result['image']
-            mask = \
+            small_mask = \
                 torch.nn.functional.interpolate(mask[None, None, ...].type(torch.float), self.mask_size,
                                                 mode="nearest")[0, 0]
-            return image / 255, mask
+            return image / 255, mask, small_mask
         
         result = self.test_transform(image=np.array(image), mask=final_mask)
         image = result["image"]
