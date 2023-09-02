@@ -13,8 +13,7 @@ import numpy as np
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 from src.utils import get_random_crop_coordinates
-import random 
-from torchvision import transforms
+
 
 part_names_mapping = {
     "skin": "skin",
@@ -33,7 +32,7 @@ part_names_mapping = {
     "cloth": "cloth",
 }
 
-parts_names = ["skin", "eye", "mouth", "nose", "brow", "ear", "neck", "cloth", "hair"]
+parts_names = ["background", "skin", "eye", "mouth", "nose", "brow", "ear", "neck", "cloth", "hair"]
 
 part_names_mapping_1 = {
     "r_eye": "r_eye",
@@ -56,25 +55,85 @@ part_names_mapping_1 = {
     "eye_g": "eye_g",
 }
 
-non_skin_part_names = ["eye", "mouth", "nose", "brow", "ear", "cloth", "hair", "neck"]
-non_skin_part_names_1 = ["r_eye", "l_eye", "mouth", "nose", "r_brow", "l_brow", "r_ear", "l_ear", "ear_r", "u_lip", "l_lip", "neck", "cloth", "hair", "hat", "neck_l", "eye_g"]
+# non_skin_part_names = ["eye", "mouth", "nose", "brow", "ear", "cloth", "hair", "neck"]
+# non_skin_part_names_1 = ["r_eye", "l_eye", "mouth", "nose", "r_brow", "l_brow", "r_ear", "l_ear", "ear_r", "u_lip", "l_lip", "neck", "cloth", "hair", "hat", "neck_l", "eye_g"]
 
 
 class CelebaHQDataset(Dataset):
-    def __init__(self, images_dir, masks_dir, idx_mapping_file, parts_to_return, data_ids=None, file_names_file_path=None, train=True, mask_size=256, min_crop_ratio=0.5, version='10'):
-        self.images_paths = []
-        self.masks_paths = []
+    def __init__(
+            self,
+            images_dir,
+            masks_dir,
+            idx_mapping_file,
+            parts_to_return,
+            data_ids=None,
+            file_names_file_path=None,
+            train=True,
+            mask_size=256,
+            min_crop_ratio=0.5,
+            version='10'
+        ):
         self.parts_to_return = parts_to_return
         self.train = train
         self.mask_size = mask_size
         self.min_crop_ratio = min_crop_ratio
+        self.version = version
+
+        self.images_paths = []
+        self.masks_paths = []
         self.return_whole = False
         self.dataset_len = 0
-        self.version = version
         if self.parts_to_return[0] == 'whole':
             self.parts_to_return = parts_names
             self.return_whole = True
-        self.current_part_idx = 0
+        self.preprocess(
+            idx_mapping_file=idx_mapping_file,
+            file_names_file_path=file_names_file_path,
+            version=version,
+            masks_dir=masks_dir,
+            images_dir=images_dir,
+            data_ids=data_ids
+        )
+        
+        if version == "19":
+            self.train_transform_1 = A.Compose([ # celebe19 line 211
+                A.Resize(512, 512),
+                A.GaussianBlur(blur_limit=(1, 7)),
+            ])
+            self.test_transform = A.Compose([
+                A.Resize(256, 256),
+                ToTensorV2()
+            ])
+        elif version == "10":
+            self.train_transform_1 = A.Compose([ # celebe10
+                A.Resize(512, 512),
+                A.HorizontalFlip(),
+                # A.GaussianBlur(blur_limit=(1, 11)),
+            ])
+            self.test_transform = A.Compose([
+                A.Resize(512, 512),
+                ToTensorV2()
+            ])
+
+        self.train_transform_2 = A.Compose([
+            # A.RandomResizedCrop(512, 512, (0.4, 1), ratio=(1., 1.)),
+            A.Resize(512, 512),
+            A.CLAHE(),
+            A.ColorJitter(brightness=0.5, contrast=0.2, saturation=0.1, hue=0.1),
+            A.Rotate((-10, 10), border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0),
+            ToTensorV2(),
+        ])
+        
+
+    def preprocess(
+            self,
+            idx_mapping_file,
+            file_names_file_path,
+            version,
+            masks_dir,
+            images_dir,
+            data_ids,
+        ):
         mapping_dict = {}
         with open(idx_mapping_file) as file:
             mappings = file.readlines()[1:]
@@ -124,30 +183,7 @@ class CelebaHQDataset(Dataset):
                 aux_masks_paths.append(self.masks_paths[id])
             self.images_paths = aux_images_paths
             self.masks_paths = aux_masks_paths
-        if version == "19":
-            self.train_transform_1 = A.Compose([ # celebe19 line 211
-                A.Resize(512, 512),
-                A.GaussianBlur(blur_limit=(1, 7)),
-            ])
-        elif version == "10":
-            self.train_transform_1 = A.Compose([ # celebe10
-                A.Resize(512, 512),
-                A.HorizontalFlip(),
-                # A.GaussianBlur(blur_limit=(1, 11)),
-            ])
 
-        self.train_transform_2 = A.Compose([
-            # A.RandomResizedCrop(512, 512, (0.4, 1), ratio=(1., 1.)),
-            A.Resize(512, 512),
-            A.CLAHE(),
-            A.ColorJitter(brightness=0.5, contrast=0.2, saturation=0.1, hue=0.1),
-            A.Rotate((-10, 10), border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0),
-            ToTensorV2(),
-        ])
-        self.test_transform = A.Compose([
-            A.Resize(512, 512),
-            ToTensorV2()
-        ])
 
     def __getitem__(self, idx):
         image = Image.open(self.images_paths[idx])
@@ -161,7 +197,7 @@ class CelebaHQDataset(Dataset):
                     aux_mask += mask
                 aux_mask = np.where(aux_mask > 0, 1, 0)
             if not isinstance(aux_mask, int):
-                final_mask = np.where(aux_mask > 0, idx+1, final_mask)
+                final_mask = np.where(aux_mask > 0, idx, final_mask)
         if self.return_whole:
             final_mask = np.where(final_mask>0, 1., 0.)
         if self.train:

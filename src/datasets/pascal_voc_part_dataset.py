@@ -115,7 +115,7 @@ class PascalVOCPartDataset(Dataset):
             images_base_dir,
             data_file_ids_file,
             object_name_to_return,
-            part_names_to_return,
+            parts_to_return,
             object_size_thresh=50*50,
             train=True,
             train_data_ids=(0,),
@@ -134,28 +134,91 @@ class PascalVOCPartDataset(Dataset):
         super().__init__()
         self.ann_file_base_dir = ann_file_base_dir
         self.images_base_dir = images_base_dir
+        self.parts_to_return = parts_to_return
+        self.object_size_thresh = object_size_thresh
         self.train = train
         self.train_data_ids = train_data_ids
         self.mask_size = mask_size
         self.blur_background = blur_background
         self.fill_background_with_black = fill_background_with_black
-        self.counter = 0
-        self.data = []
-        self.part_names_to_return = part_names_to_return
-        self.return_whole = False
-        if self.part_names_to_return[1] == 'whole':
-            if object_name_to_return == 'car':
-                self.part_names_to_return = ['background', 'body', 'light', 'plate', 'wheel', 'window']
-            elif object_name_to_return == 'horse':
-                self.part_names_to_return = ['background', 'head', 'neck+torso', 'leg', 'tial']
-            self.return_whole = True
         self.final_min_crop_size = final_min_crop_size
         self.single_object = single_object
         self.zero_pad_test_output = zero_pad_test_output
         self.keep_aspect_ratio = keep_aspect_ratio
         self.min_crop_ratio = min_crop_ratio
+        
+        self.data = []
+        self.return_whole = False
+        if self.parts_to_return[0] == 'whole':
+            if object_name_to_return == 'car':
+                self.parts_to_return = ['background', 'body', 'light', 'plate', 'wheel', 'window']
+            elif object_name_to_return == 'horse':
+                self.parts_to_return = ['background', 'head', 'neck+torso', 'leg', 'tial']
+            self.return_whole = True
         self.current_part_idx = 0
-        counter_ = 0
+        
+        self.preprocess_dataset(
+            data_file_ids_file,
+            remove_overlapping_objects,
+            ann_file_base_dir,
+            images_base_dir,
+            object_overlapping_threshold,
+            object_name_to_return,
+            adjust_bounding_box
+        )
+
+        if train_data_ids != (0,):
+            selected_data = []
+            for id in train_data_ids:
+                selected_data.append(self.data[id])
+            self.data = selected_data
+
+        
+        if self.keep_aspect_ratio:
+            self.train_transform_1 = A.Compose([
+                A.SmallestMaxSize(512),
+                # A.Resize(512, 512),
+                A.HorizontalFlip(),
+                # A.RandomScale((0.5, 2), always_apply=True),
+                A.GaussianBlur(blur_limit=(1, 15)),
+            ])
+            self.test_transform = A.Compose([
+                A.SmallestMaxSize(512),
+                # A.Resize(512, 512),
+                ToTensorV2()
+            ])
+            self.test_transform_1 = A.Compose([
+                A.Resize(512, 512),
+                ToTensorV2()
+            ])
+        else:
+            self.train_transform_1 = A.Compose([
+                A.Resize(512, 512),
+                A.HorizontalFlip(),
+                # A.RandomScale((0.5, 2), always_apply=True),
+                A.GaussianBlur(blur_limit=(1, 15)),
+            ])
+            self.test_transform = A.Compose([
+                A.Resize(512, 512),
+                ToTensorV2()
+            ])
+        self.train_transform_2 = A.Compose([
+            A.Resize(512, 512),
+            A.Rotate((-10, 10), border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0),
+            ToTensorV2(),
+        ])
+
+            
+    def preprocess_dataset(
+            self,
+            data_file_ids_file,
+            remove_overlapping_objects,
+            ann_file_base_dir,
+            images_base_dir,
+            object_overlapping_threshold,
+            object_name_to_return,
+            adjust_bounding_box
+        ):
         with open(data_file_ids_file) as file:
             data_file_ids = file.readlines()
         progress_bar = tqdm(data_file_ids)
@@ -189,8 +252,6 @@ class PascalVOCPartDataset(Dataset):
                     iou = (intersection / (union - intersection + 1e-7))
                     ys, xs = np.where(np.triu(iou, 1) >= object_overlapping_threshold)
                     object_ids_to_remove += np.concatenate([ys, xs]).tolist()
-            if len(object_ids_to_remove) > 0:
-                print(object_ids_to_remove)
             if self.single_object:
                 aux_part_data = {}
                 data = []
@@ -220,7 +281,7 @@ class PascalVOCPartDataset(Dataset):
                             aux_data = aux_part_data.get("non_body", [])
                             aux_data.append((object_id, part_id))
                             aux_part_data["non_body"] = aux_data
-                        if part_mapping[object_name][part_name] in self.part_names_to_return:
+                        if part_mapping[object_name][part_name] in self.parts_to_return:
                             includes_part = True
                     if not includes_part:
                         continue
@@ -233,7 +294,6 @@ class PascalVOCPartDataset(Dataset):
                             y_min, y_max = adjust_bbox_coords(width, height, y_min, y_max, m_h)
 
                         if x_min < 0 or y_min < 0:
-                            counter_ += 1
                             x_min = max(0, x_min)
                             y_min = max(0, y_min)
 
@@ -276,7 +336,7 @@ class PascalVOCPartDataset(Dataset):
                             aux_data = aux_part_data.get("non_body", [])
                             aux_data.append(part_id)
                             aux_part_data["non_body"] = aux_data
-                        if part_mapping[object_name][part_name] in self.part_names_to_return:
+                        if part_mapping[object_name][part_name] in self.parts_to_return:
                             includes_part = True
                     objects_data[object_id] = aux_part_data
                 if not includes_part:
@@ -287,82 +347,8 @@ class PascalVOCPartDataset(Dataset):
                     "part_data": objects_data,
                     "bbox": [x_min, y_min, x_max, y_max],
                 })
-        print("number of images with changed aspect ratio: ", counter_)
-        if train_data_ids != (0,):
-            selected_data = []
-            for id in train_data_ids:
-                selected_data.append(self.data[id])
-            self.data = selected_data
-
-        if zero_pad_test_output:
-            self.train_transform = A.Compose([
-                # A.Resize(512, 512),
-                A.LongestMaxSize(512),
-                A.PadIfNeeded(512, 512, border_mode=cv2.BORDER_CONSTANT, value=0,
-                              mask_value=0),
-                A.HorizontalFlip(),
-                # A.RandomScale((0.5, 2), always_apply=True),
-                A.RandomResizedCrop(512, 512, (0.8, 1)),
-                A.Rotate((-10, 10), border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0),
-                ToTensorV2()
-            ])
-            self.test_transform = A.Compose([
-                A.LongestMaxSize(512),
-                A.PadIfNeeded(512, 512, border_mode=cv2.BORDER_CONSTANT, value=0,
-                              mask_value=0),
-                ToTensorV2()
-            ])
-        else:
-            if self.keep_aspect_ratio:
-                self.train_transform_1 = A.Compose([
-                    A.SmallestMaxSize(512),
-                    # A.Resize(512, 512),
-                    A.HorizontalFlip(),
-                    # A.RandomScale((0.5, 2), always_apply=True),
-                    A.GaussianBlur(blur_limit=(1, 15)),
-                ])
-                self.test_transform = A.Compose([
-                    A.SmallestMaxSize(512),
-                    # A.Resize(512, 512),
-                    ToTensorV2()
-                ])
-                self.test_transform_1 = A.Compose([
-                    A.Resize(512, 512),
-                    ToTensorV2()
-                ])
-            else:
-                self.train_transform_1 = A.Compose([
-                    A.Resize(512, 512),
-                    A.HorizontalFlip(),
-                    # A.RandomScale((0.5, 2), always_apply=True),
-                    A.GaussianBlur(blur_limit=(1, 15)),
-                ])
-                self.test_transform = A.Compose([
-                    A.Resize(512, 512),
-                    ToTensorV2()
-                ])
-            self.train_transform_2 = A.Compose([
-                # A.RandomResizedCrop(512, 512, (0.4, 1), ratio=(1., 1.)),
-                A.Resize(512, 512),
-                A.Rotate((-10, 10), border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0),
-                ToTensorV2(),
-            ])
-
-            # self.train_transform = A.Compose([
-            #     A.Resize(512, 512),
-            #     # A.LongestMaxSize(512),
-            #     # A.PadIfNeeded(512, 512, border_mode=cv2.BORDER_CONSTANT, value=0,
-            #     #               mask_value=0),
-            #     A.HorizontalFlip(),
-            #     # A.RandomScale((0.5, 2), always_apply=True),
-            #     A.GaussianBlur(blur_limit=(1, 31)),
-            #     # A.Persepective(scale=(0.05, 0.1), pad_mode=cv2.BORDER_REPLICATE),
-            #     A.RandomResizedCrop(512, 512, (0.4, 1)),
-            #     A.Rotate((-10, 10), border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0),
-            #     ToTensorV2()
-            # ])
-            
-
+    
+    
     def __getitem__(self, idx):
         data = self.data[idx]
         if self.single_object:
@@ -377,7 +363,7 @@ class PascalVOCPartDataset(Dataset):
             body_mask = 0
             non_body_mask = 0
             whole_mask = 0
-            for idx, part_name in enumerate(self.part_names_to_return):
+            for idx, part_name in enumerate(self.parts_to_return):
                 part_ids = part_data.get(part_name, None)
                 if part_ids is not None:
                     if part_name == "body":
@@ -398,7 +384,7 @@ class PascalVOCPartDataset(Dataset):
             body_mask = 0
             non_body_mask = 0
             for object_id in part_data:
-                for idx, part_name in enumerate(self.part_names_to_return):
+                for idx, part_name in enumerate(self.parts_to_return):
                     part_ids = part_data[object_id].get(part_name, None)
                     if part_ids is not None:
                         if part_name == "body":
@@ -448,7 +434,7 @@ class PascalVOCPartDataset(Dataset):
             mask = \
                 torch.nn.functional.interpolate(mask[None, None, ...].type(torch.float), self.mask_size, mode="nearest")[0, 0]
             self.current_part_idx += 1
-            self.current_part_idx = self.current_part_idx % len(self.part_names_to_return[1:])
+            self.current_part_idx = self.current_part_idx % len(self.parts_to_return[1:])
             return image/255, mask
         else:
             result = self.test_transform(image=np.array(image), mask=mask)
@@ -471,7 +457,7 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
             train_data_file_ids_file: str = "./data",
             val_data_file_ids_file: str = "./data",
             object_name: str = "car",
-            part_names: Tuple[str] = [""],
+            parts_to_return: Tuple[str] = [""],
             batch_size: int = 1,
             train_data_ids: Tuple[int] = (2,),
             val_data_ids: Tuple[int] = (2,),
@@ -494,7 +480,7 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
         self.train_data_file_ids_file = train_data_file_ids_file
         self.val_data_file_ids_file = val_data_file_ids_file
         self.object_name = object_name
-        self.part_names = part_names
+        self.parts_to_return = parts_to_return
         self.batch_size = batch_size
         self.train_data_ids = train_data_ids
         self.val_data_ids = val_data_ids
@@ -517,7 +503,7 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
                 images_base_dir=self.images_base_dir,
                 data_file_ids_file=self.train_data_file_ids_file,
                 object_name_to_return=self.object_name,
-                part_names_to_return=self.part_names,
+                parts_to_return=self.parts_to_return,
                 object_size_thresh=object_size_thresh[self.object_name],
                 train=True,
                 train_data_ids=self.train_data_ids,
@@ -537,7 +523,7 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
                 images_base_dir=self.images_base_dir,
                 data_file_ids_file=self.train_data_file_ids_file,
                 object_name_to_return=self.object_name,
-                part_names_to_return=self.part_names,
+                parts_to_return=self.parts_to_return,
                 object_size_thresh=object_size_thresh[self.object_name],
                 train=False,
                 train_data_ids=self.val_data_ids,
@@ -557,7 +543,7 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
                     images_base_dir=self.images_base_dir,
                     data_file_ids_file=self.val_data_file_ids_file,
                     object_name_to_return=self.object_name,
-                    part_names_to_return=self.part_names,
+                    parts_to_return=self.parts_to_return,
                     object_size_thresh=object_size_thresh[self.object_name],
                     train=False,
                     remove_overlapping_objects=self.remove_overlapping_objects,
@@ -578,7 +564,7 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
                     image_dir,
                     os.path.join(self.car_test_data_dir, 'gt_mask'),
                     train=False,
-                    part_names=self.part_names[1:],
+                    part_names=self.parts_to_return[1:],
                     object_name=self.object_name,
                 )
 

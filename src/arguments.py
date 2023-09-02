@@ -44,7 +44,7 @@ def add_base_args(parser):
     parser.add_argument('--dataset', type=str, default='pascal', choices=['sample', 'pascal', 'celeba-hq', 'paper_test', 'ade20k', 'cat15'])
     parser.add_argument('--noise_dir', type=str, default=None)
     parser.add_argument('--checkpoint_dir', type=str, required=True)
-    parser.add_argument('--part_names', nargs='+', type=str, required=False)
+    parser.add_argument('--parts_to_return', nargs='+', type=str, required=False)
     parser.add_argument('--objective_to_optimize', type=str, default='text_embedding')
     parser.add_argument('--log_images', action='store_true', default=False)
     parser.add_argument('--text_prompt', type=str, default='')

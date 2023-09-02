@@ -24,7 +24,7 @@ def main():
             src_mask_dirs=config.src_mask_paths,
             batch_size=config.batch_size,
             mask_size=config.mask_size,
-            num_parts=len(config.part_names)-1,
+            num_parts=len(config.parts_to_return)-1,
             min_crop_ratio=config.min_crop_ratio,
         )
     elif config.dataset == "pascal":
@@ -35,7 +35,7 @@ def main():
             train_data_file_ids_file=config.train_data_file_ids_file,
             val_data_file_ids_file=config.val_data_file_ids_file,
             object_name=config.object_name,
-            part_names=config.part_names,
+            parts_to_return=config.parts_to_return,
             batch_size=config.batch_size,
             train_data_ids=config.train_data_ids,
             val_data_ids=config.val_data_ids,
@@ -59,7 +59,7 @@ def main():
             test_file_names_file_path=config.test_file_names_file_path,
             train_file_names_file_path=config.train_file_names_file_path,
             val_file_names_file_path=config.val_file_names_file_path,
-            parts_to_return=config.part_names[1:],
+            parts_to_return=config.parts_to_return[1:],
             batch_size=config.batch_size,
             mask_size=config.mask_size,
             train_data_ids=config.train_data_ids,
@@ -86,7 +86,6 @@ def main():
         dm = CAT15DataModule(
             train_data_dir=config.train_data_dir,
             test_data_dir=config.test_data_dir,
-            part_name=config.part_names[0],
             mask_size=config.mask_size,
             min_crop_ratio=config.min_crop_ratio,
         )
