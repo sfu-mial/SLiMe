@@ -47,7 +47,6 @@ def main():
             final_min_crop_size=config.final_min_crop_size,
             single_object=config.single_object,
             adjust_bounding_box=config.adjust_bounding_box,
-            zero_pad_test_output=config.zero_pad_test_output,
             keep_aspect_ratio=config.keep_aspect_ratio,
             min_crop_ratio=config.min_crop_ratio,
         )
@@ -59,7 +58,7 @@ def main():
             test_file_names_file_path=config.test_file_names_file_path,
             train_file_names_file_path=config.train_file_names_file_path,
             val_file_names_file_path=config.val_file_names_file_path,
-            parts_to_return=config.parts_to_return[1:],
+            parts_to_return=config.parts_to_return,
             batch_size=config.batch_size,
             mask_size=config.mask_size,
             train_data_ids=config.train_data_ids,
@@ -72,7 +71,6 @@ def main():
             test_images_dir=config.test_images_dir,
             test_masks_dir=config.test_masks_dir,
             mask_size=config.mask_size,
-            zero_pad_test_output=config.zero_pad_test_output,
         )
     elif config.dataset == 'ade20k':
         dm = ADE20KDataModule(

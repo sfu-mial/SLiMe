@@ -78,7 +78,6 @@ class PaperTestSampleDataModule(pl.LightningDataModule):
             images_dir: str = "./data",
             masks_dir: str = "./data",
             mask_size: int = 128,
-            zero_pad_test_output: bool = False,
     ):
         super().__init__()
         self.object_name = object_name
@@ -86,7 +85,6 @@ class PaperTestSampleDataModule(pl.LightningDataModule):
         self.images_dir = images_dir
         self.masks_dir = masks_dir
         self.mask_size = mask_size
-        self.zero_pad_test_output = zero_pad_test_output
 
     def setup(self, stage: str):
         if stage == 'fit':
@@ -121,7 +119,6 @@ class PaperTestSampleDataModule(pl.LightningDataModule):
                 masks_dir=self.masks_dir,
                 transform=test_transform,
                 train=False,
-                zero_pad_test_output=self.zero_pad_test_output,
                 parts_to_return=self.parts_to_return,
                 object_name=self.object_name,
             )

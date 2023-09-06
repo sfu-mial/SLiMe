@@ -105,7 +105,7 @@ def get_file_dirs(annotation_file, ann_file_base_dir, images_base_dir):
     return ann_file_path, img_file_path
 
 
-object_size_thresh={"car": 50 * 50, "horse": 32 * 32, "dog": 32 * 32}
+object_size_thresh_dict={"car": 50 * 50, "horse": 32 * 32, "dog": 32 * 32}
 
 
 class PascalVOCPartDataset(Dataset):
@@ -127,7 +127,6 @@ class PascalVOCPartDataset(Dataset):
             final_min_crop_size=512,
             single_object=True,
             adjust_bounding_box=False,
-            zero_pad_test_output=False,
             keep_aspect_ratio=False,
             min_crop_ratio=0.5,
     ):
@@ -135,7 +134,6 @@ class PascalVOCPartDataset(Dataset):
         self.ann_file_base_dir = ann_file_base_dir
         self.images_base_dir = images_base_dir
         self.parts_to_return = parts_to_return
-        self.object_size_thresh = object_size_thresh
         self.train = train
         self.train_data_ids = train_data_ids
         self.mask_size = mask_size
@@ -143,7 +141,6 @@ class PascalVOCPartDataset(Dataset):
         self.fill_background_with_black = fill_background_with_black
         self.final_min_crop_size = final_min_crop_size
         self.single_object = single_object
-        self.zero_pad_test_output = zero_pad_test_output
         self.keep_aspect_ratio = keep_aspect_ratio
         self.min_crop_ratio = min_crop_ratio
         
@@ -164,7 +161,8 @@ class PascalVOCPartDataset(Dataset):
             images_base_dir,
             object_overlapping_threshold,
             object_name_to_return,
-            adjust_bounding_box
+            adjust_bounding_box,
+            object_size_thresh
         )
 
         if train_data_ids != (0,):
@@ -196,7 +194,7 @@ class PascalVOCPartDataset(Dataset):
                 A.Resize(512, 512),
                 A.HorizontalFlip(),
                 # A.RandomScale((0.5, 2), always_apply=True),
-                A.GaussianBlur(blur_limit=(1, 15)),
+                A.GaussianBlur(blur_limit=(1, 7)),
             ])
             self.test_transform = A.Compose([
                 A.Resize(512, 512),
@@ -217,7 +215,8 @@ class PascalVOCPartDataset(Dataset):
             images_base_dir,
             object_overlapping_threshold,
             object_name_to_return,
-            adjust_bounding_box
+            adjust_bounding_box,
+            object_size_thresh
         ):
         with open(data_file_ids_file) as file:
             data_file_ids = file.readlines()
@@ -469,7 +468,6 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
             final_min_crop_size: int = 512,
             single_object: bool = True,
             adjust_bounding_box: bool = False,
-            zero_pad_test_output: bool = False,
             keep_aspect_ratio: bool = False,
             min_crop_ratio: float = 0.5,
     ):
@@ -492,7 +490,6 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
         self.final_min_crop_size = final_min_crop_size
         self.single_object = single_object
         self.adjust_bounding_box = adjust_bounding_box
-        self.zero_pad_test_output = zero_pad_test_output
         self.keep_aspect_ratio = keep_aspect_ratio
         self.min_crop_ratio = min_crop_ratio
 
@@ -504,7 +501,7 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
                 data_file_ids_file=self.train_data_file_ids_file,
                 object_name_to_return=self.object_name,
                 parts_to_return=self.parts_to_return,
-                object_size_thresh=object_size_thresh[self.object_name],
+                object_size_thresh=object_size_thresh_dict[self.object_name],
                 train=True,
                 train_data_ids=self.train_data_ids,
                 mask_size=self.mask_size,
@@ -524,7 +521,7 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
                 data_file_ids_file=self.train_data_file_ids_file,
                 object_name_to_return=self.object_name,
                 parts_to_return=self.parts_to_return,
-                object_size_thresh=object_size_thresh[self.object_name],
+                object_size_thresh=object_size_thresh_dict[self.object_name],
                 train=False,
                 train_data_ids=self.val_data_ids,
                 remove_overlapping_objects=self.remove_overlapping_objects,
@@ -533,7 +530,6 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
                 fill_background_with_black=self.fill_background_with_black,
                 single_object=self.single_object,
                 adjust_bounding_box=self.adjust_bounding_box,
-                zero_pad_test_output=self.zero_pad_test_output,
                 keep_aspect_ratio=self.keep_aspect_ratio,
             )
         elif stage == "test":
@@ -544,7 +540,7 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
                     data_file_ids_file=self.val_data_file_ids_file,
                     object_name_to_return=self.object_name,
                     parts_to_return=self.parts_to_return,
-                    object_size_thresh=object_size_thresh[self.object_name],
+                    object_size_thresh=object_size_thresh_dict[self.object_name],
                     train=False,
                     remove_overlapping_objects=self.remove_overlapping_objects,
                     object_overlapping_threshold=self.object_overlapping_threshold,
@@ -552,7 +548,6 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
                     fill_background_with_black=self.fill_background_with_black,
                     single_object=self.single_object,
                     adjust_bounding_box=self.adjust_bounding_box,
-                    zero_pad_test_output=self.zero_pad_test_output,
                     keep_aspect_ratio=self.keep_aspect_ratio,
                 )
             elif self.object_name == 'car':
@@ -560,12 +555,18 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
                     image_dir = os.path.join(self.car_test_data_dir, 'image_no_bg')
                 else:
                     image_dir = os.path.join(self.car_test_data_dir, 'image_bg')
+                test_transform = A.Compose([
+                    A.Resize(512, 512),
+                    # A.SmallestMaxSize(512),
+                    ToTensorV2()
+                ])
                 self.test_dataset = PaperTestSampleDataset(
                     image_dir,
                     os.path.join(self.car_test_data_dir, 'gt_mask'),
                     train=False,
-                    part_names=self.parts_to_return[1:],
+                    parts_to_return=self.parts_to_return,
                     object_name=self.object_name,
+                    transform=test_transform
                 )
 
     def train_dataloader(self):

@@ -49,6 +49,7 @@ def add_base_args(parser):
     parser.add_argument('--log_images', action='store_true', default=False)
     parser.add_argument('--text_prompt', type=str, default='')
     parser.add_argument('--argmax_ca_before_sa', action='store_true', default=False)
+    parser.add_argument('--not_use_self_attention', action='store_true', default=False)
     return parser
     
 def add_sample_dataset_args(parser):
@@ -119,7 +120,6 @@ def add_test_args(parser):
     parser.add_argument('--crop_margin', default=10, type=int)
     parser.add_argument('--min_square_size', default=100, type=int)
     parser.add_argument('--crop_threshold', type=float)
-    parser.add_argument('--zero_pad_test_output', action='store_true', default=False)
     return parser
 
 def init_args():

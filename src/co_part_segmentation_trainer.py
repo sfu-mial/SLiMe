@@ -108,7 +108,7 @@ class CoSegmenterTrainer(pl.LightningModule):
             #     self_attention_map = (sd_self_attention_maps * small_sd_cross_attention_maps2.flatten(1,2)[..., None, None]).sum(dim=1)
             #     one_shot_mask = torch.zeros(len(self.config.parts_to_return), mask.shape[0], mask.shape[1]).to(mask.device).scatter_(0, mask.unsqueeze(0).type(torch.int64), 1.)
             #     loss2 = torch.nn.functional.mse_loss(self_attention_map, one_shot_mask)
-            self_atttention_maps = []
+            # self_atttention_maps = []
             if sd_self_attention_maps is not None:
                 small_sd_cross_attention_maps2 = torch.nn.functional.interpolate(sd_cross_attention_maps2[None, ...], 64, mode="bilinear")[0]
                 for i in range(len(self.config.parts_to_return)):
@@ -120,7 +120,10 @@ class CoSegmenterTrainer(pl.LightningModule):
             self.log("loss2", loss2.detach().cpu(), on_step=True, sync_dist=True)
         else:
             loss = loss1 + self.config.sd_loss_coef * sd_loss
-
+        sd_cross_attention_maps2 = None
+        sd_self_attention_maps = None
+        small_sd_cross_attention_maps2 = None
+        self_attention_map = None
         self.test_t_embedding = t_embedding
         if self.config.masking == 'patched_masking':
             final_mask = self.get_patched_masks(src_images,
@@ -134,7 +137,9 @@ class CoSegmenterTrainer(pl.LightningModule):
                                             batch_idx)
         
         ious = []
-        for idx, part_name in enumerate(self.config.part_names):
+        for idx, part_name in enumerate(self.config.parts_to_return):
+            if self.config.dataset == 'ade20k' and idx == 0:
+                continue
             part_mask = torch.where(large_mask.cpu() == idx, 1, 0).type(torch.uint8)
             if torch.all(part_mask == 0):
                 continue
@@ -182,54 +187,7 @@ class CoSegmenterTrainer(pl.LightningModule):
                        os.path.join(self.checkpoint_dir, "noise.pth"))
         gc.collect()
 
-    # def get_patched_masks(self, image, crop_size, num_crops_per_side, threshold):
-    #     crops_coords = get_crops_coords(image.shape[2:], crop_size,
-    #                                     num_crops_per_side)
-
-    #     final_attention_map = torch.zeros(len(self.config.parts_to_return), image.shape[2], image.shape[3])
-    #     aux_attention_map = torch.zeros(len(self.config.parts_to_return), image.shape[2], image.shape[3], dtype=torch.uint8) + 1e-7
-    #     for crop_coord in crops_coords:
-    #         y_start, y_end, x_start, x_end = crop_coord
-    #         cropped_image = image[:, :, y_start:y_end, x_start:x_end]
-    #         with torch.no_grad():
-    #             _, _, sd_cross_attention_maps2, sd_self_attention_maps = self.stable_diffusion.train_step(
-    #                 self.test_t_embedding, cropped_image,
-    #                 t=torch.tensor(self.config.t), back_propagate_loss=False, generate_new_noise=False,
-    #                 attention_output_size=64,
-    #                 token_ids=list(range(len(self.config.parts_to_return))), train=False)
-    #         self_attention_map = \
-    #                 torch.nn.functional.interpolate(sd_self_attention_maps[None, ...],
-    #                                                 crop_size, mode="bilinear")[0].detach()
-            
-    #         attention_maps = sd_cross_attention_maps2.flatten(1, 2).detach()  # len(self.config.checkpoint_dir) , 64x64
-    #         sd_cross_attention_maps2 = None
-    #         sd_self_attention_maps = None
-    #         max_values = attention_maps.max(dim=1).values  # len(self.config.checkpoint_dir)
-    #         min_values = attention_maps.min(dim=1).values  # len(self.config.checkpoint_dir)
-    #         passed_indices = torch.where(max_values >= threshold)[0]  #
-    #         if len(passed_indices) > 0:
-    #             attention_maps = attention_maps[passed_indices]
-    #             max_values = attention_maps.max(dim=1).values
-    #             min_values = attention_maps.min(dim=1).values
-    #             avg_self_attention_map = (
-    #                         attention_maps[..., None, None] *
-    #                         self_attention_map).sum(dim=1)
-    #             avg_self_attention_map_min = avg_self_attention_map.view(-1, avg_self_attention_map.shape[1]*avg_self_attention_map.shape[2]).min(1).values
-    #             avg_self_attention_map_max = avg_self_attention_map.view(-1, avg_self_attention_map.shape[1]*avg_self_attention_map.shape[2]).max(1).values
-    #             coef = (avg_self_attention_map_max - avg_self_attention_map_min) / (
-    #                         max_values - min_values)
-    #             final_attention_map[passed_indices.cpu(), y_start:y_end, x_start:x_end] += (
-    #                         (avg_self_attention_map / coef[..., None, None]) + (
-    #                         min_values - avg_self_attention_map_min / coef)[..., None, None]).cpu()
-    #             aux_attention_map[passed_indices.cpu(), y_start:y_end, x_start:x_end] += (torch.ones_like(avg_self_attention_map, dtype=torch.uint8)).cpu()
-                
-    #     final_attention_map = final_attention_map / aux_attention_map
-    #     final_mask = final_attention_map.argmax(0)
-
-    #     return final_mask
-
-
-
+    
     def get_patched_masks(self, image, crop_size, num_crops_per_side, threshold):
         crops_coords = get_crops_coords(image.shape[2:], crop_size,
                                         num_crops_per_side)
@@ -247,7 +205,7 @@ class CoSegmenterTrainer(pl.LightningModule):
                     token_ids=self.token_ids, train=False)
             if self.config.argmax_ca_before_sa:
                 sd_cross_attention_maps2 = torch.where(sd_cross_attention_maps2 == sd_cross_attention_maps2.max(0, keepdim=True).values, 1., 0)
-            if self.config.self_attention_loss_coef > 0:
+            if not self.config.not_use_self_attention:
                 self_attention_map = \
                         torch.nn.functional.interpolate(sd_self_attention_maps[None, ...],
                                                         crop_size, mode="bilinear")[0].detach()
@@ -257,11 +215,11 @@ class CoSegmenterTrainer(pl.LightningModule):
             min_values = attention_maps.min(dim=1).values  # len(self.config.checkpoint_dir)
             passed_indices = torch.where(max_values >= threshold)[0]  #
             if len(passed_indices) > 0:
-                passed_attention_maps = attention_maps[passed_indices]
+                attention_maps = attention_maps[passed_indices]
                 for idx, mask_id in enumerate(passed_indices):
-                    if self.config.self_attention_loss_coef > 0:
+                    if not self.config.not_use_self_attention:
                         avg_self_attention_map = (
-                                passed_attention_maps[idx][..., None, None] *
+                                attention_maps[idx][..., None, None] *
                                 self_attention_map).sum(dim=0)
                         avg_self_attention_map_min = avg_self_attention_map.min()
                         avg_self_attention_map_max = avg_self_attention_map.max()
@@ -272,7 +230,7 @@ class CoSegmenterTrainer(pl.LightningModule):
                                 min_values[mask_id] - avg_self_attention_map_min / coef)).cpu()
                         aux_attention_map[mask_id, y_start:y_end, x_start:x_end] += (torch.ones_like(avg_self_attention_map, dtype=torch.uint8)).cpu()
                     else:
-                        final_attention_map[mask_id, y_start:y_end, x_start:x_end] += torch.nn.functional.interpolate(passed_attention_maps[idx].reshape(64, 64)[None, None, ...], crop_size, mode="bilinear")[0, 0].cpu()
+                        final_attention_map[mask_id, y_start:y_end, x_start:x_end] += torch.nn.functional.interpolate(attention_maps[idx].reshape(64, 64)[None, None, ...], crop_size, mode="bilinear")[0, 0].cpu()
 
         final_attention_map /= aux_attention_map
         final_mask = final_attention_map.argmax(0)
@@ -298,7 +256,7 @@ class CoSegmenterTrainer(pl.LightningModule):
         if len(passed_indices) > 0:
             passed_attention_maps = attention_maps[passed_indices]
             for idx, mask_id in enumerate(passed_indices):
-                if self.config.self_attention_loss_coef > 0:
+                if not self.config.not_use_self_attention:
                     avg_self_attention_map = (
                             passed_attention_maps[idx][..., None, None] *
                             self_attention_map).mean(dim=0)
@@ -358,7 +316,7 @@ class CoSegmenterTrainer(pl.LightningModule):
         if len(passed_indices) > 0:
             passed_attention_maps = attention_maps[passed_indices]
             for idx, mask_id in enumerate(passed_indices):
-                if self.config.self_attention_loss_coef > 0:
+                if not self.config.not_use_self_attention:
                     avg_self_attention_map = (
                                 passed_attention_maps[idx][..., None, None] *
                                 self_attention_map).mean(dim=0)
@@ -422,23 +380,6 @@ class CoSegmenterTrainer(pl.LightningModule):
         self.val_ious.append(mean_iou)
         self.log("val mean iou", mean_iou, on_step=True, sync_dist=True)
         return torch.tensor(0.)
-    
-    # def on_validation_epoch_end(self):
-    #     epoch_mean_iou = sum(self.ious)/len(self.ious)
-    #     if epoch_mean_iou >= self.max_val_iou:
-    #         self.max_val_iou = epoch_mean_iou
-    #         if self.config.objective_to_optimize == "text_embedding":
-    #             for i, embedding in enumerate(self.embeddings_to_optimize):
-    #                 torch.save(embedding,
-    #                         os.path.join(self.checkpoint_dir, f"embedding_{i}.pth"))
-    #             # torch.save(self.token_0,
-    #             #         os.path.join(self.checkpoint_dir, "token_0.pth"))
-    #         elif self.config.objective_to_optimize == "translator":
-    #             torch.save(self.translator.state_dict(),
-    #                     os.path.join(self.checkpoint_dir, "translator.pth"))
-    #         torch.save(self.stable_diffusion.noise.cpu(),
-    #                    os.path.join(self.checkpoint_dir, "noise.pth"))
-    #     gc.collect()
 
     def on_test_start(self) -> None:
         if self.config.second_gpu_id is None:

@@ -102,7 +102,6 @@ class Config:
         self.num_crops_per_side = 2
         self.crop_size = 300
         self.crop_threshold = 0.2
-        self.zero_pad_test_output = False
         self.masking = 'zoomed_masking'
 
     # Only for pascal dataset

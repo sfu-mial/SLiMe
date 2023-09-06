@@ -85,11 +85,11 @@ class CAT15DataModule(pl.LightningDataModule):
             A.Resize(256, 256),
             A.HorizontalFlip(),
             # A.RandomScale((0.5, 2), always_apply=True),
-            A.GaussianBlur(blur_limit=(1, 9)),
-            A.RandomResizedCrop(256, 256, (min_crop_ratio, 1)),
-            A.CLAHE(),
-            A.ColorJitter(brightness=0.5, contrast=0.2, saturation=0.1, hue=0.1),
-            A.Rotate((-30, 30), border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0),
+            # A.GaussianBlur(blur_limit=(1, 3)),
+            # A.RandomResizedCrop(256, 256, (min_crop_ratio, 1)),
+            # A.CLAHE(),
+            # A.ColorJitter(brightness=0.5, contrast=0.2, saturation=0.1, hue=0.1),
+            # A.Rotate((-30, 30), border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0),
             ToTensorV2()
         ])
         self.test_transform = A.Compose([
@@ -103,17 +103,17 @@ class CAT15DataModule(pl.LightningDataModule):
             self.train_dataset = CAT15Dataset(
                 data_dir=self.train_data_dir,
                 transform=self.train_transform,
-                data_ids=[5, 30],
+                data_ids=[0, 30],
                 train=True,
                 mask_size=self.mask_size
             )
-            self.val_dataset = CAT15Dataset(
-                data_dir=self.train_data_dir,
-                transform=self.test_transform,
-                data_ids=[0, 5],
-                train=False,
-                mask_size=256
-            )
+            # self.val_dataset = CAT15Dataset(
+            #     data_dir=self.train_data_dir,
+            #     transform=self.test_transform,
+            #     data_ids=[0, 5],
+            #     train=False,
+            #     mask_size=256
+            # )
         elif stage == "test":
             self.test_dataset = CAT15Dataset(
                 data_dir=self.test_data_dir,
@@ -125,8 +125,8 @@ class CAT15DataModule(pl.LightningDataModule):
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=3, shuffle=True)
 
-    def val_dataloader(self):
-        return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=3, shuffle=False)
+    # def val_dataloader(self):
+    #     return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=3, shuffle=False)
 
     def test_dataloader(self):
         return DataLoader(self.test_dataset, batch_size=self.batch_size, num_workers=3, shuffle=False)
