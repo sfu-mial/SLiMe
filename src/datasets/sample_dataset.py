@@ -107,11 +107,11 @@ class SampleDataModule(pl.LightningDataModule):
                 num_parts=self.num_parts,
                 min_crop_ratio=self.min_crop_ratio,
             )
-            self.val_dataset = SampleDataset(
-                image_dirs=self.src_image_dirs[len(self.src_image_dirs)//2:],
-                mask_dirs=self.src_mask_dirs[len(self.src_mask_dirs)//2:],
-                train=False,
-            )
+            # self.val_dataset = SampleDataset(
+            #     image_dirs=self.src_image_dirs[len(self.src_image_dirs)//2:],
+            #     mask_dirs=self.src_mask_dirs[len(self.src_mask_dirs)//2:],
+            #     train=False,
+            # )
         # elif stage == 'test':
         #     self.test_dataset = SampleDataset(
         #         image_dirs=self.target_image_dir,
@@ -122,8 +122,8 @@ class SampleDataModule(pl.LightningDataModule):
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=8, shuffle=True)
 
-    def val_dataloader(self):
-        return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=8, shuffle=False)
+    # def val_dataloader(self):
+    #     return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=8, shuffle=False)
     
     # def test_dataloader(self):
     #     return DataLoader(self.test_dataset, batch_size=self.batch_size, num_workers=8, shuffle=False)

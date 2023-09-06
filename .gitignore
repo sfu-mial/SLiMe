@@ -7,5 +7,5 @@ checkpoints/version_0/optimized_text_embedding.pth
 *.ipynb
 *.xml
 *.iml
-*.pyc
 *.bin
+*.pyc
