@@ -3,8 +3,7 @@ from glob import glob
 
 class Config:
     def __init__(self):
-
-    # general
+        # general
         self.base_dir = ""
         self.batch_size = 1
         self.lr_1 = 0.1
@@ -25,20 +24,20 @@ class Config:
             # 'down_blocks[2].attentions[1].transformer_blocks[0].attn1',
             # 'down_blocks[2].attentions[1].transformer_blocks[0].attn2',  ##########
             # 'up_blocks[1].attentions[0].transformer_blocks[0].attn1',
-            'up_blocks[1].attentions[0].transformer_blocks[0].attn2',  ########## +
+            "up_blocks[1].attentions[0].transformer_blocks[0].attn2",  ########## +
             # 'up_blocks[1].attentions[1].transformer_blocks[0].attn1',
-            'up_blocks[1].attentions[1].transformer_blocks[0].attn2',  ########## +
+            "up_blocks[1].attentions[1].transformer_blocks[0].attn2",  ########## +
             # 'up_blocks[1].attentions[2].transformer_blocks[0].attn1',
-            'up_blocks[1].attentions[2].transformer_blocks[0].attn2',  ########## +
+            "up_blocks[1].attentions[2].transformer_blocks[0].attn2",  ########## +
             # 'up_blocks[2].attentions[0].transformer_blocks[0].attn1',
-            'up_blocks[2].attentions[0].transformer_blocks[0].attn2',  # +
+            "up_blocks[2].attentions[0].transformer_blocks[0].attn2",  # +
             # 'up_blocks[2].attentions[1].transformer_blocks[0].attn1',
-            'up_blocks[2].attentions[1].transformer_blocks[0].attn2',  # +
+            "up_blocks[2].attentions[1].transformer_blocks[0].attn2",  # +
             # 'up_blocks[2].attentions[2].transformer_blocks[0].attn1',
             # 'up_blocks[2].attentions[2].transformer_blocks[0].attn2',
             # 'up_blocks[3].attentions[0].transformer_blocks[0].attn1',
             # 'up_blocks[3].attentions[0].transformer_blocks[0].attn2',
-            'up_blocks[3].attentions[1].transformer_blocks[0].attn1',  #############3
+            "up_blocks[3].attentions[1].transformer_blocks[0].attn1",  #############3
             # 'up_blocks[3].attentions[1].transformer_blocks[0].attn2',
             # 'up_blocks[3].attentions[2].transformer_blocks[0].attn1',
             # 'up_blocks[3].attentions[2].transformer_blocks[0].attn2',
@@ -58,14 +57,22 @@ class Config:
         # self.noise_path = "/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/stable_diffusion_2/noise1.pth"
         self.noise_path = None
 
-    # Only for sample dataset
+        # Only for sample dataset
         # self.src_image_paths = sorted(glob("/home/aliasgahr/Downloads/co_part_segmentation_data/horse/*.jpg"))[-10:]
-        self.src_image_paths = [f"/home/aliasgahr/Downloads/co_part_segmentation_data/horse/horse_{i}.jpg" for i in range(1,11)]
+        self.src_image_paths = [
+            f"/home/aliasgahr/Downloads/co_part_segmentation_data/horse/horse_{i}.jpg"
+            for i in range(1, 11)
+        ]
         # self.src_mask_paths = sorted(glob("/home/aliasgahr/Downloads/co_part_segmentation_data/horse/horse_tail_*.png"))[-10:]
-        self.src_mask_paths = ["/home/aliasgahr/Downloads/co_part_segmentation_data/car/train_data/car_whole_17.png"]
-        self.target_image_path = [f"/home/aliasgahr/Downloads/co_part_segmentation_data/car/train_data/car_{i}.jpg" for i in range(1,27)]
+        self.src_mask_paths = [
+            "/home/aliasgahr/Downloads/co_part_segmentation_data/car/train_data/car_whole_17.png"
+        ]
+        self.target_image_path = [
+            f"/home/aliasgahr/Downloads/co_part_segmentation_data/car/train_data/car_{i}.jpg"
+            for i in range(1, 27)
+        ]
 
-    # For training
+        # For training
         self.train_checkpoint_dir = "/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/stable_diffusion_2/human_brow_2"
         # self.train_part_names = ["background", "mouth", "nose", "brow", "ear"]
         self.train_part_names = ["background", "brow"]
@@ -76,15 +83,15 @@ class Config:
         # self.train_part_names = ['background', 'head', 'nose', 'ear', 'eye']
         self.self_attention_loss_coef = 1
 
-    # For testing
-    #     self.test_checkpoint_dir = ["/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/dog_nose"]
-    #     self.test_part_names = ["background", "nose"]
-    #     self.test_checkpoint_dir = ["/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/car_whole_t_hl_bg",
-                                # "/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/car_light1",
-                                # "/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/car_plate1",
-                                # "/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/car_wheel1",
-                                # "/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/car_window1",
-                                # ]
+        # For testing
+        #     self.test_checkpoint_dir = ["/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/dog_nose"]
+        #     self.test_part_names = ["background", "nose"]
+        #     self.test_checkpoint_dir = ["/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/car_whole_t_hl_bg",
+        # "/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/car_light1",
+        # "/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/car_plate1",
+        # "/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/car_wheel1",
+        # "/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/car_window1",
+        # ]
         # self.test_part_names = ["background", "body", "light", "plate", "wheel", "window"]
         # self.test_checkpoint_dir = ["/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/horse_whole_t_hl_one",
         #                         "/home/aliasgahr/Documents/project/co_part_segmentation/checkpoints/horse_leg",
@@ -99,12 +106,12 @@ class Config:
         self.test_part_names = ["background", "brow"]
         # self.test_part_names = ['background', 'head', 'nose', 'torso', 'tail', 'neck', 'leg', 'paw', 'ear', 'eye', 'muzzl']
         # self.test_part_names = ['background', 'head', 'nose', 'ear', 'eye']
-        self.num_crops_per_side = 2
-        self.crop_size = 300
-        self.crop_threshold = 0.2
-        self.masking = 'zoomed_masking'
+        self.num_patchs_per_side = 2
+        self.patch_size = 300
+        self.patch_threshold = 0.2
+        self.masking = "zoomed_masking"
 
-    # Only for pascal dataset
+        # Only for pascal dataset
         self.object_name = "horse"
         self.train_data_file_ids_file = "/home/aliasgahr/Downloads/part_segmentation/VOCtrainval_03-May-2010/VOCdevkit/VOC2010/ImageSets/Main/horse_train.txt"
         self.val_data_file_ids_file = "/home/aliasgahr/Downloads/part_segmentation/VOCtrainval_03-May-2010/VOCdevkit/VOC2010/ImageSets/Main/horse_val.txt"
@@ -112,10 +119,9 @@ class Config:
         self.fill_background_with_black = False
         self.remove_overlapping_objects = True
         self.object_overlapping_threshold = 0.05
-        self.final_min_crop_size = 400
+        self.min_crop_size = 400
         self.single_object = True
         self.adjust_bounding_box = False
-
 
         # self.train_part_names = ["background", "head", "leg", "neck+torso", "tail"]
         # first set of runs use mean+2std
@@ -161,14 +167,23 @@ class Config:
         # self.train_data_ids = [1, 3, 4, 5, 13, 14, 16, 17, 18, 22]  # horse tail
         # self.val_data_ids = [23, 24, 26, 27, 31, 33, 34, 35, 36, 41]  # horse tail
 
-
-    # only for celeba dataset
-        self.images_dir = '/home/aliasgahr/Downloads/CelebAMask-HQ/CelebA-HQ-img'
-        self.masks_dir = '/home/aliasgahr/Downloads/CelebAMask-HQ/CelebAMask-HQ-mask-anno'
-        self.idx_mapping_file = '/home/aliasgahr/Downloads/CelebAMask-HQ/CelebA-HQ-to-CelebA-mapping.txt'
-        self.test_file_names_file_path = '/home/aliasgahr/Downloads/CelebAMask-HQ/paper_test_file_names.txt'
-        self.train_file_names_file_path = '/home/aliasgahr/Downloads/CelebAMask-HQ/non_test_file_names.txt'
-        self.val_file_names_file_path = '/home/aliasgahr/Downloads/CelebAMask-HQ/non_test_file_names.txt'
+        # only for celeba dataset
+        self.images_dir = "/home/aliasgahr/Downloads/CelebAMask-HQ/CelebA-HQ-img"
+        self.masks_dir = (
+            "/home/aliasgahr/Downloads/CelebAMask-HQ/CelebAMask-HQ-mask-anno"
+        )
+        self.idx_mapping_file = (
+            "/home/aliasgahr/Downloads/CelebAMask-HQ/CelebA-HQ-to-CelebA-mapping.txt"
+        )
+        self.test_file_names_file_path = (
+            "/home/aliasgahr/Downloads/CelebAMask-HQ/paper_test_file_names.txt"
+        )
+        self.train_file_names_file_path = (
+            "/home/aliasgahr/Downloads/CelebAMask-HQ/non_test_file_names.txt"
+        )
+        self.val_file_names_file_path = (
+            "/home/aliasgahr/Downloads/CelebAMask-HQ/non_test_file_names.txt"
+        )
         # self.train_data_ids = [i for i in range(10)]
         self.val_data_ids = [i for i in range(200, 210)]
         # self.train_data_ids = [0, 1, 8, 9, 12, 36, 50, 57, 67, 70]  # eye
@@ -205,6 +220,6 @@ class Config:
         # 595 car window         -> (55.45 | 607) -
         # 596 car body           -> (57.62 | 607) -
 
-    # Paper Test Dataset
+        # Paper Test Dataset
         self.test_images_dir = "/home/aliasgahr/Downloads/Car_TestSet/image_bg"
         self.test_masks_dir = "/home/aliasgahr/Downloads/Car_TestSet/gt_mask"

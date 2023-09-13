@@ -11,6 +11,7 @@ from src.datasets.ade20k_dataset import ADE20KDataModule
 from src.datasets.cat15_dataset import CAT15DataModule
 from src.arguments import init_args
 
+
 def main():
     # torch.manual_seed(42)
     config = init_args()
@@ -23,8 +24,9 @@ def main():
             target_image_dir=config.target_image_path,
             src_mask_dirs=config.src_mask_paths,
             batch_size=config.batch_size,
-            mask_size=config.mask_size,
-            num_parts=len(config.parts_to_return)-1,
+            train_mask_size=config.train_mask_size,
+            test_mask_size=config.test_mask_size,
+            num_parts=len(config.parts_to_return) - 1,
             min_crop_ratio=config.min_crop_ratio,
         )
     elif config.dataset == "pascal":
@@ -39,12 +41,13 @@ def main():
             batch_size=config.batch_size,
             train_data_ids=config.train_data_ids,
             val_data_ids=config.val_data_ids,
-            mask_size=config.mask_size,
+            train_mask_size=config.train_mask_size,
+            test_mask_size=config.test_mask_size,
             blur_background=config.blur_background,
             fill_background_with_black=config.fill_background_with_black,
             remove_overlapping_objects=config.remove_overlapping_objects,
             object_overlapping_threshold=config.object_overlapping_threshold,
-            final_min_crop_size=config.final_min_crop_size,
+            min_crop_size=config.min_crop_size,
             single_object=config.single_object,
             adjust_bounding_box=config.adjust_bounding_box,
             keep_aspect_ratio=config.keep_aspect_ratio,
@@ -60,7 +63,8 @@ def main():
             val_file_names_file_path=config.val_file_names_file_path,
             parts_to_return=config.parts_to_return,
             batch_size=config.batch_size,
-            mask_size=config.mask_size,
+            train_mask_size=config.train_mask_size,
+            test_mask_size=config.test_mask_size,
             train_data_ids=config.train_data_ids,
             val_data_ids=config.val_data_ids,
             min_crop_ratio=config.min_crop_ratio,
@@ -70,9 +74,10 @@ def main():
         dm = PaperTestSampleDataModule(
             test_images_dir=config.test_images_dir,
             test_masks_dir=config.test_masks_dir,
-            mask_size=config.mask_size,
+            train_mask_size=config.train_mask_size,
+            test_mask_size=config.test_mask_size,
         )
-    elif config.dataset == 'ade20k':
+    elif config.dataset == "ade20k":
         dm = ADE20KDataModule(
             train_data_dir=config.train_data_dir,
             test_data_dir=config.test_data_dir,
@@ -80,7 +85,7 @@ def main():
             mask_size=config.mask_size,
             min_crop_ratio=config.min_crop_ratio,
         )
-    elif config.dataset == 'cat15':
+    elif config.dataset == "cat15":
         dm = CAT15DataModule(
             train_data_dir=config.train_data_dir,
             test_data_dir=config.test_data_dir,
@@ -104,7 +109,7 @@ def main():
         log_every_n_steps=1,
         # accumulate_grad_batches=config.train_num_crops // config.batch_size,
         enable_checkpointing=False,
-        num_sanity_val_steps=0
+        num_sanity_val_steps=0,
     )
     if config.train:
         trainer.fit(model=model, datamodule=dm)
