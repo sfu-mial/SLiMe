@@ -97,7 +97,6 @@ class CAT15DataModule(pl.LightningDataModule):
 
     def setup(self, stage: str):
         if stage == "fit":
-
             self.train_dataset = CAT15Dataset(
                 data_dir=self.train_data_dir,
                 transform=self.train_transform,

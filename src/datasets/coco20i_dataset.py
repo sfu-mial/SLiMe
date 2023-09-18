@@ -22,10 +22,10 @@ class COCODataset(Dataset):
         self.data = []
         self.masks = []
         for category in fold_categories:
-            catId = coco.getCatIds(catNms=category['name'])
+            catId = coco.getCatIds(catNms=category["name"])
             imgIds = coco.getImgIds(catIds=catId)
             imgs = coco.loadImgs(imgIds)
             for img in imgs:
-                self.data.append([catId, img['file_name']])
-                annId = coco.getAnnIds(imgIds=img['id'], catIds=catId, iscrowd=None)
+                self.data.append([catId, img["file_name"]])
+                annId = coco.getAnnIds(imgIds=img["id"], catIds=catId, iscrowd=None)
                 coco.loadAnns(annId)

@@ -62,6 +62,7 @@ def add_base_args(parser):
     parser.add_argument("--argmax_ca_before_sa", action="store_true", default=False)
     parser.add_argument("--not_use_self_attention", action="store_true", default=False)
     parser.add_argument("--guidance_scale", type=int, default=100)
+    parser.add_argument("--trained_embeddings_dir", type=str, default=None)
     return parser
 
 
@@ -122,8 +123,8 @@ def add_paper_test_dataset_args(parser):
 def add_train_args(parser):
     parser.add_argument("--optimizer", type=str, default="Adam")
     parser.add_argument("--epochs", type=int, default=40)
-    parser.add_argument("--self_attention_loss_coef", type=float, default=1.0)
     parser.add_argument("--lr", type=float, default=0.1)
+    parser.add_argument("--pixel_classifier_lr", type=float, default=0.001)
     parser.add_argument("--train_mask_size", type=int, default=128)
     parser.add_argument("--val_data_ids", nargs="+", type=int)
     parser.add_argument("--train_data_ids", nargs="+", type=int)
@@ -135,9 +136,12 @@ def add_train_args(parser):
     parser.add_argument("--accumulate_grad_batches", type=int, default=1)
     parser.add_argument("--class_weights", nargs="+", type=float)
     parser.add_argument("--ce_weighting", type=str, default="constant")
+    parser.add_argument("--self_attention_loss_coef", type=float, default=1.0)
     parser.add_argument("--sd_loss_coef", type=float, default=0)
+    parser.add_argument("--pixel_classifier_loss_coef", type=float, default=0)
     parser.add_argument("--min_crop_ratio", type=float, default=0.8)
     parser.add_argument("--sample_noise_on_epoch", action="store_true", default=False)
+    parser.add_argument("--first_stage_epoch", type=int, default=150)
     return parser
 
 
@@ -146,7 +150,7 @@ def add_test_args(parser):
         "--masking",
         type=str,
         default="zoomed_masking",
-        choices=["zoomed_masking", "patched_masking"],
+        choices=["zoomed_masking", "patched_masking", "pixel_classifier", "simple"],
     )
     parser.add_argument("--num_patchs_per_side", type=int)
     parser.add_argument("--patch_size", type=int)

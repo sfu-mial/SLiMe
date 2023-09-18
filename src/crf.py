@@ -14,15 +14,18 @@ def crf(original_image, annotated_image, use_2d=True):
     cv2.imwrite("testing2.png", annotated_image)
     annotated_image = annotated_image.astype(np.uint32)
     # Converting the annotations RGB color to single 32 bit integer
-    annotated_label = annotated_image[:, :, 0].astype(np.uint32) + (annotated_image[:, :, 1] << 8).astype(np.uint32) + (
-            annotated_image[:, :, 2] << 16).astype(np.uint32)
+    annotated_label = (
+        annotated_image[:, :, 0].astype(np.uint32)
+        + (annotated_image[:, :, 1] << 8).astype(np.uint32)
+        + (annotated_image[:, :, 2] << 16).astype(np.uint32)
+    )
 
     # Convert the 32bit integer color to 0,1, 2, ... labels.
     colors, labels = np.unique(annotated_label, return_inverse=True)
 
     # Creating a mapping back to 32 bit colors
     colorize = np.empty((len(colors), 3), np.uint8)
-    colorize[:, 0] = (colors & 0x0000FF)
+    colorize[:, 0] = colors & 0x0000FF
     colorize[:, 1] = (colors & 0x00FF00) >> 8
     colorize[:, 2] = (colors & 0xFF0000) >> 16
 
@@ -41,14 +44,22 @@ def crf(original_image, annotated_image, use_2d=True):
         d.setUnaryEnergy(U)
 
         # This adds the color-independent term, features are the locations only.
-        d.addPairwiseGaussian(sxy=(3, 3), compat=3, kernel=dcrf.DIAG_KERNEL,
-                              normalization=dcrf.NORMALIZE_SYMMETRIC)
+        d.addPairwiseGaussian(
+            sxy=(3, 3),
+            compat=3,
+            kernel=dcrf.DIAG_KERNEL,
+            normalization=dcrf.NORMALIZE_SYMMETRIC,
+        )
 
         # This adds the color-dependent term, i.e. features are (x,y,r,g,b).
-        d.addPairwiseBilateral(sxy=(80, 80), srgb=(13, 13, 13), rgbim=original_image,
-                               compat=10,
-                               kernel=dcrf.DIAG_KERNEL,
-                               normalization=dcrf.NORMALIZE_SYMMETRIC)
+        d.addPairwiseBilateral(
+            sxy=(80, 80),
+            srgb=(13, 13, 13),
+            rgbim=original_image,
+            compat=10,
+            kernel=dcrf.DIAG_KERNEL,
+            normalization=dcrf.NORMALIZE_SYMMETRIC,
+        )
 
     # Run Inference for 5 steps
     Q = d.inference(5)

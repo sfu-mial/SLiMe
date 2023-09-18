@@ -80,15 +80,13 @@ class CelebaHQDataset(Dataset):
         data_ids=[],
         file_names_file_path=None,
         train=True,
-        train_mask_size=256,
-        test_mask_size=256,
+        mask_size=256,
         min_crop_ratio=0.5,
         version="10",
     ):
         self.parts_to_return = parts_to_return
         self.train = train
-        self.train_mask_size = train_mask_size
-        self.test_mask_size = test_mask_size
+        self.mask_size = mask_size
         self.min_crop_ratio = min_crop_ratio
         self.version = version
 
@@ -122,7 +120,7 @@ class CelebaHQDataset(Dataset):
                 [  # celebe10
                     A.Resize(512, 512),
                     A.HorizontalFlip(),
-                    # A.GaussianBlur(blur_limit=(1, 11)),
+                    A.GaussianBlur(blur_limit=(1, 5)),
                 ]
             )
             self.test_transform = A.Compose([A.Resize(512, 512), ToTensorV2()])
@@ -131,8 +129,8 @@ class CelebaHQDataset(Dataset):
             [
                 # A.RandomResizedCrop(512, 512, (0.4, 1), ratio=(1., 1.)),
                 A.Resize(512, 512),
-                A.CLAHE(),
-                A.ColorJitter(brightness=0.5, contrast=0.2, saturation=0.1, hue=0.1),
+                # A.CLAHE(),
+                # A.ColorJitter(brightness=0.5, contrast=0.2, saturation=0.1, hue=0.1),
                 A.Rotate(
                     (-10, 10), border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0
                 ),
@@ -237,25 +235,20 @@ class CelebaHQDataset(Dataset):
             image = image[y_start:y_end, x_start:x_end]
             result = self.train_transform_2(image=image, mask=final_mask)
             mask, image = result["mask"], result["image"]
-            train_mask = torch.nn.functional.interpolate(
+            mask = torch.nn.functional.interpolate(
                 mask[None, None, ...].type(torch.float),
-                self.train_mask_size,
+                self.mask_size,
                 mode="nearest",
             )[0, 0]
-            test_mask = torch.nn.functional.interpolate(
-                mask[None, None, ...].type(torch.float),
-                self.test_mask_size,
-                mode="nearest",
-            )[0, 0]
-            return image / 255, test_mask, train_mask
+            return image / 255, mask
 
         result = self.test_transform(image=np.array(image), mask=final_mask)
         image = result["image"]
         mask = result["mask"]
-        test_mask = torch.nn.functional.interpolate(
-            mask[None, None, ...].type(torch.float), self.test_mask_size, mode="nearest"
+        mask = torch.nn.functional.interpolate(
+            mask[None, None, ...].type(torch.float), self.mask_size, mode="nearest"
         )[0, 0]
-        return image / 255, test_mask
+        return image / 255, mask
 
     def __len__(self):
         return len(self.images_paths)
@@ -315,8 +308,7 @@ class CelebaHQDataModule(pl.LightningDataModule):
                 data_ids=self.train_data_ids,
                 file_names_file_path=self.train_file_names_file_path,
                 train=True,
-                train_mask_size=self.train_mask_size,
-                test_mask_size=self.test_mask_size,
+                mask_size=self.train_mask_size,
                 min_crop_ratio=self.min_crop_ratio,
                 version=self.version,
             )
@@ -328,7 +320,7 @@ class CelebaHQDataModule(pl.LightningDataModule):
                 data_ids=self.val_data_ids,
                 file_names_file_path=self.val_file_names_file_path,
                 train=False,
-                test_mask_size=self.test_mask_size,
+                mask_size=self.test_mask_size,
                 version=self.version,
             )
         elif stage == "test":
@@ -339,7 +331,7 @@ class CelebaHQDataModule(pl.LightningDataModule):
                 parts_to_return=self.parts_to_return,
                 file_names_file_path=self.test_file_names_file_path,
                 train=False,
-                test_mask_size=self.test_mask_size,
+                mask_size=self.test_mask_size,
                 version=self.version,
             )
 

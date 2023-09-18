@@ -118,8 +118,7 @@ class PascalVOCPartDataset(Dataset):
         object_size_thresh=50 * 50,
         train=True,
         data_ids=[],
-        train_mask_size=512,
-        test_mask_size=512,
+        mask_size=512,
         remove_overlapping_objects=False,
         object_overlapping_threshold=0.05,
         blur_background=False,
@@ -136,8 +135,7 @@ class PascalVOCPartDataset(Dataset):
         self.parts_to_return = parts_to_return
         self.train = train
         self.data_ids = data_ids
-        self.train_mask_size = train_mask_size
-        self.test_mask_size = test_mask_size
+        self.mask_size = mask_size
         self.blur_background = blur_background
         self.fill_background_with_black = fill_background_with_black
         self.min_crop_size = min_crop_size
@@ -533,33 +531,28 @@ class PascalVOCPartDataset(Dataset):
             mask, image = result["mask"], result["image"]
             # image = result["image"]
             # mask = torch.as_tensor(result["mask"])
-            train_mask = torch.nn.functional.interpolate(
+            mask = torch.nn.functional.interpolate(
                 mask[None, None, ...].type(torch.float),
-                self.train_mask_size,
-                mode="nearest",
-            )[0, 0]
-            test_mask = torch.nn.functional.interpolate(
-                mask[None, None, ...].type(torch.float),
-                self.test_mask_size,
+                self.mask_size,
                 mode="nearest",
             )[0, 0]
             self.current_part_idx += 1
             self.current_part_idx = self.current_part_idx % len(
                 self.parts_to_return[1:]
             )
-            return image / 255, test_mask, train_mask
+            return image / 255, mask
         else:
             result = self.test_transform(image=np.array(image), mask=mask)
             if max(result["mask"].shape) > 1024:
                 result = self.test_transform_1(image=np.array(image), mask=mask)
             image = result["image"]
             mask = result["mask"]
-            test_mask = torch.nn.functional.interpolate(
+            mask = torch.nn.functional.interpolate(
                 mask[None, None, ...].type(torch.float),
-                self.test_mask_size,
+                self.mask_size,
                 mode="nearest",
             )[0, 0]
-            return image / 255, test_mask
+            return image / 255, mask
 
     def __len__(self):
         return len(self.data)
@@ -624,8 +617,7 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
                 object_size_thresh=object_size_thresh_dict[self.object_name],
                 train=True,
                 data_ids=self.train_data_ids,
-                train_mask_size=self.train_mask_size,
-                test_mask_size=self.test_mask_size,
+                mask_size=self.train_mask_size,
                 remove_overlapping_objects=self.remove_overlapping_objects,
                 object_overlapping_threshold=self.object_overlapping_threshold,
                 blur_background=self.blur_background,
@@ -645,7 +637,7 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
                 object_size_thresh=object_size_thresh_dict[self.object_name],
                 train=False,
                 data_ids=self.val_data_ids,
-                test_mask_size=self.test_mask_size,
+                mask_size=self.test_mask_size,
                 remove_overlapping_objects=self.remove_overlapping_objects,
                 object_overlapping_threshold=self.object_overlapping_threshold,
                 blur_background=self.blur_background,
@@ -664,7 +656,7 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
                     parts_to_return=self.parts_to_return,
                     object_size_thresh=object_size_thresh_dict[self.object_name],
                     train=False,
-                    test_mask_size=self.test_mask_size,
+                    mask_size=self.test_mask_size,
                     remove_overlapping_objects=self.remove_overlapping_objects,
                     object_overlapping_threshold=self.object_overlapping_threshold,
                     blur_background=self.blur_background,
@@ -692,7 +684,7 @@ class PascalVOCPartDataModule(pl.LightningDataModule):
                     parts_to_return=self.parts_to_return,
                     object_name=self.object_name,
                     transform=test_transform,
-                    test_mask_size=self.test_mask_size,
+                    mask_size=self.test_mask_size,
                 )
 
     def train_dataloader(self):

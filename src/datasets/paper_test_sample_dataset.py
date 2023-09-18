@@ -34,8 +34,7 @@ class PaperTestSampleDataset(Dataset):
         masks_dir,
         transform,
         train=True,
-        train_mask_size=128,
-        test_mask_size=128,
+        mask_size=128,
         object_name="car",
         parts_to_return=(
             "background",
@@ -46,8 +45,7 @@ class PaperTestSampleDataset(Dataset):
         self.mask_dirs = sorted(glob(os.path.join(masks_dir, "*")))
         self.transform = transform
         self.train = train
-        self.train_mask_size = train_mask_size
-        self.test_mask_size = test_mask_size
+        self.mask_size = mask_size
         self.object_name = object_name
         self.parts_to_return = parts_to_return
 
@@ -81,24 +79,19 @@ class PaperTestSampleDataset(Dataset):
         image = result["image"]
         mask = result["mask"]
         if self.train:
-            test_mask = torch.nn.functional.interpolate(
+            mask = torch.nn.functional.interpolate(
                 mask[None, None, ...].type(torch.float),
-                self.test_mask_size,
+                self.mask_size,
                 mode="nearest",
             )[0, 0]
-            train_mask = torch.nn.functional.interpolate(
-                mask[None, None, ...].type(torch.float),
-                self.train_mask_size,
-                mode="nearest",
-            )[0, 0]
-            return image / 255, test_mask, train_mask
+            return image / 255, mask
         else:
-            test_mask = torch.nn.functional.interpolate(
+            mask = torch.nn.functional.interpolate(
                 mask[None, None, ...].type(torch.float),
-                self.test_mask_size,
+                self.mask_size,
                 mode="nearest",
             )[0, 0]
-            return image / 255, test_mask
+            return image / 255, mask
 
     def __len__(self):
         return len(self.image_dirs)
@@ -148,8 +141,7 @@ class PaperTestSampleDataModule(pl.LightningDataModule):
                 masks_dir=self.masks_dir,
                 transform=train_transform,
                 train=True,
-                train_mask_size=self.train_mask_size,
-                test_mask_size=self.test_mask_size,
+                mask_size=self.train_mask_size,
                 parts_to_return=self.parts_to_return,
                 object_name=self.object_name,
             )
@@ -166,8 +158,7 @@ class PaperTestSampleDataModule(pl.LightningDataModule):
                 masks_dir=self.masks_dir,
                 transform=test_transform,
                 train=False,
-                train_mask_size=self.train_mask_size,
-                test_mask_size=self.test_mask_size,
+                mask_size=self.test_mask_size,
                 parts_to_return=self.parts_to_return,
                 object_name=self.object_name,
             )

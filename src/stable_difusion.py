@@ -47,7 +47,8 @@ class StableDiffusion(nn.Module):
         )
         self.unet = UNet2DConditionModel.from_pretrained(model_key, subfolder="unet")
 
-        # del self.vae.decoder
+        del self.vae.decoder
+
         def freeze_params(params):
             for param in params:
                 param.requires_grad = False
@@ -75,15 +76,16 @@ class StableDiffusion(nn.Module):
         self.device1 = None
         print(f"[INFO] loaded stable diffusion!")
 
-        self.attention_maps = {}
         self.noise = None
         if self.partial_run:
-            del self.unet.up_blocks[3]
+            # del self.unet.up_blocks[3]
             del self.unet.conv_norm_out
             del self.unet.conv_act
             del self.unet.conv_out
 
-        def create_nested_hook(n):
+        self.attention_maps = {}
+
+        def create_nested_hook_for_attentions(n):
             def hook(module, input, output):
                 self.attention_maps[n] = output[1]
 
@@ -93,7 +95,27 @@ class StableDiffusion(nn.Module):
         for module in attention_layers_to_use:
             self.handles.append(
                 eval("self.unet." + module).register_forward_hook(
-                    create_nested_hook(module)
+                    create_nested_hook_for_attentions(module)
+                )
+            )
+
+        self.unet_features = {}
+
+        def create_nested_hook_for_unet(n):
+            def hook(module, input, output):
+                self.unet_features[n] = output[1].detach()
+
+            return hook
+
+        # modules = ["conv_in","down_blocks[0]","down_blocks[1]","down_blocks[2]","down_blocks[3]","mid_block"]
+        # modules = ["down_blocks[0].resnets[1]","up_blocks[2].upsamplers[0]","up_blocks[3].resnets[2]"]
+        modules = ["up_blocks[2].upsamplers[0]", "up_blocks[3].resnets[2]"]
+        handles = []
+
+        for module in modules:
+            handles.append(
+                eval("self.unet." + module).register_forward_hook(
+                    create_nested_hook_for_unet(module)
                 )
             )
 
@@ -103,7 +125,7 @@ class StableDiffusion(nn.Module):
         self.handles = []
         self.attention_maps = {}
 
-        def create_nested_hook_with_detach(n):
+        def create_nested_hook_for_attentions_with_detach(n):
             def hook(module, input, output):
                 self.attention_maps[n] = output[1].detach()
 
@@ -112,14 +134,14 @@ class StableDiffusion(nn.Module):
         for module in attention_layers_to_use:
             self.handles.append(
                 eval("self.unet." + module).register_forward_hook(
-                    create_nested_hook_with_detach(module)
+                    create_nested_hook_for_attentions_with_detach(module)
                 )
             )
 
     def setup(self, device, device1=None):
         self.device1 = device if device1 is None else device1
         self.vae = self.vae.to(device)
-        self.text_encoder = self.text_encoder.to(device)
+        # self.text_encoder = self.text_encoder.to(device)
         self.unet = self.unet.to(self.device1)
         self.alphas = self.alphas.to(device)
         self.device = device
@@ -134,7 +156,7 @@ class StableDiffusion(nn.Module):
             max_length=self.tokenizer.model_max_length,
             truncation=True,
             return_tensors="pt",
-        ).to(self.device)
+        )
 
         with torch.set_grad_enabled(False):
             text_embeddings = self.text_encoder(text_input.input_ids)[0]
@@ -145,7 +167,7 @@ class StableDiffusion(nn.Module):
             padding="max_length",
             max_length=self.tokenizer.model_max_length,
             return_tensors="pt",
-        ).to(self.device)
+        )
 
         with torch.set_grad_enabled(False):
             uncond_embeddings = self.text_encoder(uncond_input.input_ids)[0]
@@ -173,9 +195,8 @@ class StableDiffusion(nn.Module):
                 if train:
                     if apply_softmax:
                         reshaped_split_attention_maps = (
-                            split_attention_maps.softmax(dim=-1)[
-                                :, :, :, torch.tensor(list(token_ids))
-                            ]
+                            split_attention_maps[:, :, :, torch.tensor(list(token_ids))]
+                            .softmax(dim=-1)
                             .reshape(
                                 2,  # because of chunk
                                 channel,
@@ -335,6 +356,7 @@ class StableDiffusion(nn.Module):
                 encoder_hidden_states=text_embeddings.to(self.device1),
                 partial_run=self.partial_run,
             ).sample.to(self.device)
+            unet_features = list(self.unet_features.values())
 
         # torch.cuda.synchronize(); print(f'[TIME] guiding: unet {time.time() - _t:.4f}s')
         (
@@ -382,6 +404,7 @@ class StableDiffusion(nn.Module):
             sd_cross_attention_maps1,
             sd_cross_attention_maps2,
             sd_self_attention_maps,
+            unet_features,
         )
 
     def produce_latents(
@@ -450,7 +473,6 @@ class StableDiffusion(nn.Module):
 
         posterior = self.vae.encode(imgs).latent_dist
         latents = posterior.sample() * 0.18215
-
         return latents
 
     def prompt_to_img(

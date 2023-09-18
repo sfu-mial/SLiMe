@@ -115,7 +115,6 @@ class ADE20KDataModule(pl.LightningDataModule):
         )
         test_transform = A.Compose([A.Resize(256, 256), ToTensorV2()])
         if stage == "fit":
-
             self.train_dataset = ADE20KDataset(
                 data_dir=self.train_data_dir,
                 object_names=self.object_names,

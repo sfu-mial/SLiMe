@@ -16,31 +16,30 @@ class SampleDataset(Dataset):
         image_dirs,
         mask_dirs,
         train=True,
-        train_mask_size=512,
-        test_mask_size=512,
+        mask_size=512,
         num_parts=1,
         min_crop_ratio=0.5,
     ):
         self.image_dirs = image_dirs
         self.mask_dirs = mask_dirs
         self.train = train
-        self.train_mask_size = train_mask_size
-        self.test_mask_size = test_mask_size
+        self.mask_size = mask_size
         self.num_parts = num_parts
         self.min_crop_ratio = min_crop_ratio
         self.train_transform_1 = A.Compose(
             [
                 A.Resize(512, 512),
                 A.HorizontalFlip(),
-                A.GaussianBlur(blur_limit=(1, 21)),
+                A.GaussianBlur(blur_limit=(1, 5)),
             ]
         )
 
         self.train_transform_2 = A.Compose(
             [
                 A.Resize(512, 512),
-                A.CLAHE(),
-                A.ColorJitter(brightness=0.5, contrast=0.2, saturation=0.1, hue=0.1),
+                # A.CLAHE(),
+                A.ToGray(),
+                A.ColorJitter(brightness=0.6, contrast=0.6, saturation=0.9, hue=0.9),
                 A.Rotate(
                     (-30, 30), border_mode=cv2.BORDER_CONSTANT, value=0, mask_value=0
                 ),
@@ -76,19 +75,14 @@ class SampleDataset(Dataset):
             image = image[y_start:y_end, x_start:x_end]
             result = self.train_transform_2(image=image, mask=aux_mask)
             mask, image = result["mask"], result["image"]
-            train_mask = torch.nn.functional.interpolate(
+            mask = torch.nn.functional.interpolate(
                 mask[None, None, ...].type(torch.float),
-                self.train_mask_size,
-                mode="nearest",
-            )[0, 0]
-            test_mask = torch.nn.functional.interpolate(
-                mask[None, None, ...].type(torch.float),
-                self.test_mask_size,
+                self.mask_size,
                 mode="nearest",
             )[0, 0]
             self.current_part_idx += 1
             self.current_part_idx = self.current_part_idx % self.num_parts
-            return image / 255, test_mask, train_mask
+            return image / 255, mask
         else:
             if self.mask_dirs is not None:
                 mask = np.array(Image.open(self.mask_dirs[idx]))
@@ -96,16 +90,16 @@ class SampleDataset(Dataset):
                     mask = mask[:, :, 0]
                 result = self.test_transform(image=np.array(image), mask=mask)
                 mask = result["mask"]
-                test_mask = torch.nn.functional.interpolate(
+                mask = torch.nn.functional.interpolate(
                     mask[None, None, ...].type(torch.float),
-                    self.test_mask_size,
+                    self.mask_size,
                     mode="nearest",
                 )[0, 0]
             else:
                 result = self.test_transform(image=np.array(image))
-                test_mask = 0
+                mask = 0
             image = result["image"]
-            return image / 255, test_mask
+            return image / 255, mask
 
     def __len__(self):
         return len(self.image_dirs)
@@ -122,7 +116,6 @@ class SampleDataModule(pl.LightningDataModule):
         test_mask_size: int = 256,
         num_parts: int = 1,
         min_crop_ratio: float = 0.5,
-        image_size: int = 512,
     ):
         super().__init__()
         self.src_image_dirs = src_image_dirs
@@ -140,16 +133,16 @@ class SampleDataModule(pl.LightningDataModule):
                 image_dirs=self.src_image_dirs[0 : len(self.src_image_dirs) // 2],
                 mask_dirs=self.src_mask_dirs[0 : len(self.src_mask_dirs) // 2],
                 train=True,
-                train_mask_size=self.train_mask_size,
-                test_mask_size=self.test_mask_size,
+                mask_size=self.train_mask_size,
                 num_parts=self.num_parts,
                 min_crop_ratio=self.min_crop_ratio,
             )
-            # self.val_dataset = SampleDataset(
-            #     image_dirs=self.src_image_dirs[len(self.src_image_dirs)//2:],
-            #     mask_dirs=self.src_mask_dirs[len(self.src_mask_dirs)//2:],
-            #     train=False,
-            # )
+            self.val_dataset = SampleDataset(
+                image_dirs=self.src_image_dirs[len(self.src_image_dirs) // 2 :],
+                mask_dirs=self.src_mask_dirs[len(self.src_mask_dirs) // 2 :],
+                train=False,
+                mask_size=self.test_mask_size,
+            )
         # elif stage == 'test':
         #     self.test_dataset = SampleDataset(
         #         image_dirs=self.target_image_dir,
@@ -162,8 +155,10 @@ class SampleDataModule(pl.LightningDataModule):
             self.train_dataset, batch_size=self.batch_size, num_workers=8, shuffle=True
         )
 
-    # def val_dataloader(self):
-    #     return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=8, shuffle=False)
+    def val_dataloader(self):
+        return DataLoader(
+            self.val_dataset, batch_size=self.batch_size, num_workers=8, shuffle=False
+        )
 
     # def test_dataloader(self):
     #     return DataLoader(self.test_dataset, batch_size=self.batch_size, num_workers=8, shuffle=False)
