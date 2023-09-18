@@ -435,22 +435,8 @@ class CoSegmenterTrainer(pl.LightningModule):
             output_size,
             output_size,
         )
-        thresholded_final_attention_map = torch.zeros(
-            len(self.config.parts_to_return),
-            output_size,
-            output_size,
-        )
 
         aux_attention_map = (
-            torch.zeros(
-                len(self.config.parts_to_return),
-                output_size,
-                output_size,
-                dtype=torch.uint8,
-            )
-            + 1e-7
-        )
-        thresholded_aux_attention_map = (
             torch.zeros(
                 len(self.config.parts_to_return),
                 output_size,
@@ -492,12 +478,6 @@ class CoSegmenterTrainer(pl.LightningModule):
                 sd_cross_attention_maps2 = sd_cross_attention_maps2.flatten(
                     1, 2
                 )  # len(self.config.checkpoint_dir) , 64x64
-                # thresholded_sd_cross_attention_maps2 = torch.where(
-                #     sd_cross_attention_maps2
-                #     == sd_cross_attention_maps2.max(0, keepdim=True).values,
-                #     sd_cross_attention_maps2,
-                #     0,
-                # )
 
                 max_values = sd_cross_attention_maps2.max(
                     dim=1
@@ -505,23 +485,11 @@ class CoSegmenterTrainer(pl.LightningModule):
                 min_values = sd_cross_attention_maps2.min(
                     dim=1
                 ).values.cpu()  # len(self.config.checkpoint_dir)
-                # thresholded_max_values = thresholded_sd_cross_attention_maps2.max(
-                #     dim=1
-                # ).values.cpu()  # len(self.config.checkpoint_dir)
-                # thresholded_min_values = thresholded_sd_cross_attention_maps2.min(
-                #     dim=1
-                # ).values.cpu()  # len(self.config.checkpoint_dir)
                 passed_indices = torch.where(max_values >= self.config.patch_threshold)[
                     0
                 ]  #
                 if len(passed_indices) > 0:
                     sd_cross_attention_maps2 = sd_cross_attention_maps2[passed_indices]
-                    thresholded_sd_cross_attention_maps2 = torch.where(
-                        sd_cross_attention_maps2
-                        == sd_cross_attention_maps2.max(0, keepdim=True).values,
-                        sd_cross_attention_maps2,
-                        0,
-                    )
                     sd_cross_attention_maps2[0] = torch.where(
                         sd_cross_attention_maps2[0]
                         > sd_cross_attention_maps2[0].mean(),
@@ -540,43 +508,13 @@ class CoSegmenterTrainer(pl.LightningModule):
                                 mode="bilinear",
                             )[0, 0].cpu()
 
-                            s_mean, s_std = sd_self_attention_maps.mean(
-                                dim=(1, 2), keepdim=True
-                            ), sd_self_attention_maps.std(dim=(1, 2), keepdim=True)
-                            thresholded_avg_self_attention_map = (
-                                thresholded_sd_cross_attention_maps2[idx][
-                                    ..., None, None
-                                ]
-                                * torch.where(
-                                    sd_self_attention_maps > s_mean + 2 * s_std,
-                                    sd_self_attention_maps,
-                                    0,
-                                )
-                            ).sum(dim=0)
-                            thresholded_avg_self_attention_map = F.interpolate(
-                                thresholded_avg_self_attention_map[None, None, ...],
-                                mask_patch_size,
-                                mode="bilinear",
-                            )[0, 0].cpu()
                             avg_self_attention_map_min = avg_self_attention_map.min()
                             avg_self_attention_map_max = avg_self_attention_map.max()
-                            thresholded_avg_self_attention_map_min = (
-                                thresholded_avg_self_attention_map.min()
-                            )
-                            thresholded_avg_self_attention_map_max = (
-                                thresholded_avg_self_attention_map.max()
-                            )
                             coef = (
                                 avg_self_attention_map_max - avg_self_attention_map_min
                             ) / (max_values[mask_id] - min_values[mask_id])
-                            thresholded_coef = (
-                                thresholded_avg_self_attention_map_max
-                                - thresholded_avg_self_attention_map_min
-                            ) / (max_values[mask_id] - min_values[mask_id])
                             if torch.isnan(coef) or coef == 0:
                                 coef = 1e-7
-                            if torch.isnan(thresholded_coef) or thresholded_coef == 0:
-                                thresholded_coef = 1e-7
                             final_attention_map[
                                 mask_id,
                                 mask_y_start:mask_y_end,
@@ -584,30 +522,12 @@ class CoSegmenterTrainer(pl.LightningModule):
                             ] += (avg_self_attention_map / coef) + (
                                 min_values[mask_id] - avg_self_attention_map_min / coef
                             )
-                            thresholded_final_attention_map[
-                                mask_id,
-                                mask_y_start:mask_y_end,
-                                mask_x_start:mask_x_end,
-                            ] += (
-                                thresholded_avg_self_attention_map / thresholded_coef
-                            ) + (
-                                0
-                                - thresholded_avg_self_attention_map_min
-                                / thresholded_coef
-                            )
                             aux_attention_map[
                                 mask_id,
                                 mask_y_start:mask_y_end,
                                 mask_x_start:mask_x_end,
                             ] += torch.ones_like(
                                 avg_self_attention_map, dtype=torch.uint8
-                            )
-                            thresholded_aux_attention_map[
-                                mask_id,
-                                mask_y_start:mask_y_end,
-                                mask_x_start:mask_x_end,
-                            ] += torch.ones_like(
-                                thresholded_avg_self_attention_map, dtype=torch.uint8
                             )
                         else:
                             final_attention_map[
@@ -623,30 +543,10 @@ class CoSegmenterTrainer(pl.LightningModule):
                             )[
                                 0, 0
                             ]
-                            thresholded_final_attention_map[
-                                mask_id,
-                                mask_y_start:mask_y_end,
-                                mask_x_start:mask_x_end,
-                            ] += F.interpolate(
-                                thresholded_sd_cross_attention_maps2[idx].reshape(
-                                    64, 64
-                                )[None, None, ...],
-                                mask_patch_size,
-                                mode="bilinear",
-                            )[
-                                0, 0
-                            ]
 
         final_attention_map /= aux_attention_map
-        thresholded_final_attention_map /= thresholded_aux_attention_map
         final_mask = final_attention_map.argmax(0)
-        thresholded_final_mask = thresholded_final_attention_map.argmax(0)
-        final_mixture_mask = torch.where(
-            (final_mask > 0) & (thresholded_final_mask > 0),
-            thresholded_final_mask,
-            final_mask,
-        )
-        return final_mixture_mask
+        return final_mask
 
     def zoom_and_mask(self, image, batch_idx, output_size):
         final_attention_map = torch.zeros(
