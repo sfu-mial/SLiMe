@@ -99,25 +99,38 @@ class StableDiffusion(nn.Module):
                 )
             )
 
-        self.unet_features = {}
+        # self.unet_features = {}
 
-        def create_nested_hook_for_unet(n):
-            def hook(module, input, output):
-                self.unet_features[n] = output[1].detach()
+        # def create_nested_hook_for_unet(n):
+        #     def hook(module, input, output):
+        #         self.unet_features[n] = output.detach()
 
-            return hook
+        #     return hook
 
-        # modules = ["conv_in","down_blocks[0]","down_blocks[1]","down_blocks[2]","down_blocks[3]","mid_block"]
-        # modules = ["down_blocks[0].resnets[1]","up_blocks[2].upsamplers[0]","up_blocks[3].resnets[2]"]
-        modules = ["up_blocks[2].upsamplers[0]", "up_blocks[3].resnets[2]"]
-        handles = []
+        # # modules = ["unet.conv_in","unet.down_blocks[0]","unet.down_blocks[1]","unet.down_blocks[2]","unet.down_blocks[3]","unet.mid_block"]
+        # # modules = ["unet.down_blocks[0].resnets[1]","unet.up_blocks[2].upsamplers[0]","unet.up_blocks[3].resnets[2]"]
+        # # modules = [
+        # #     "vae.decoder.up_blocks[3].resnets[2]",
+        # #     "vae.decoder.up_blocks[2].resnets[2]",
+        # #     "vae.decoder.up_blocks[1].resnets[2]",
+        # #     "vae.decoder.up_blocks[0].resnets[2]",
+        # # ]
+        # modules = [
+        #     "vae.encoder.down_blocks[0].resnets[-1]",
+        #     "vae.encoder.down_blocks[1].resnets[-1]",
+        #     "vae.encoder.down_blocks[2].resnets[-1]",
+        #     "vae.encoder.down_blocks[3].resnets[-1]",
+        #     "vae.encoder.mid_block.resnets[-1]",
+        #     "vae.encoder.conv_out",
+        # ]
+        # handles = []
 
-        for module in modules:
-            handles.append(
-                eval("self.unet." + module).register_forward_hook(
-                    create_nested_hook_for_unet(module)
-                )
-            )
+        # for module in modules:
+        #     handles.append(
+        #         eval("self." + module).register_forward_hook(
+        #             create_nested_hook_for_unet(module)
+        #         )
+        #     )
 
     def change_hooks(self, attention_layers_to_use):
         for handle in self.handles:
@@ -258,7 +271,7 @@ class StableDiffusion(nn.Module):
 
             elif layer.endswith("attn1"):  # self attentions
                 channel, img_embed_len, img_embed_len = raw_attention_maps[layer].shape
-                split_attention_maps = raw_attention_maps[layer][: channel // 2]
+                split_attention_maps = raw_attention_maps[layer][channel // 2 :]
                 reshaped_split_attention_maps = (
                     split_attention_maps.softmax(dim=-1)
                     .reshape(
@@ -356,7 +369,7 @@ class StableDiffusion(nn.Module):
                 encoder_hidden_states=text_embeddings.to(self.device1),
                 partial_run=self.partial_run,
             ).sample.to(self.device)
-            unet_features = list(self.unet_features.values())
+            # unet_features = list(self.unet_features.values())
 
         # torch.cuda.synchronize(); print(f'[TIME] guiding: unet {time.time() - _t:.4f}s')
         (
@@ -404,7 +417,7 @@ class StableDiffusion(nn.Module):
             sd_cross_attention_maps1,
             sd_cross_attention_maps2,
             sd_self_attention_maps,
-            unet_features,
+            # unet_features,
         )
 
     def produce_latents(
