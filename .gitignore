@@ -1,11 +1,10 @@
+*.cpython-38.pyc
 .ipynb_checkpoints/
 checkpoints/
 cps_venv/
 lightning_logs/
-checkpoints/version_0/optimized_text_embedding.pth
 *.pth
 *.ipynb
 *.xml
 *.iml
 *.bin
-*.pyc

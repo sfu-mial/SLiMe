@@ -8,7 +8,7 @@ import torch.nn.functional as F
 
 from src.config import Config
 from src.stable_difusion import StableDiffusion
-from src.utils import calculate_iou, get_crops_coords, get_square_cropping_coords
+from src.utils import calculate_iou, get_crops_coords
 from src.pixel_classifier import PixelClassifier
 import gc
 from glob import glob
@@ -22,7 +22,6 @@ class CoSegmenterTrainer(pl.LightningModule):
         self.config = config
         self.save_hyperparameters(config.__dict__)
         self.learning_rate = learning_rate
-        self.automatic_optimization = False
         self.max_val_iou = 0
         self.val_ious = []
 
@@ -43,33 +42,26 @@ class CoSegmenterTrainer(pl.LightningModule):
         del self.stable_diffusion.text_encoder
         torch.cuda.empty_cache()
 
-        if self.config.objective_to_optimize == "translator":
-            self.translator = torch.nn.Sequential(torch.nn.Linear(1024, 1024))
-            self.translator[0].weight.data.zero_()
-            self.translator[0].bias.data.zero_()
-        elif self.config.objective_to_optimize == "text_embedding":
-            if self.config.train:
-                self.embeddings_to_optimize = []
-                if self.config.trained_embeddings_dir is not None:
-                    embeddings_paths = sorted(
-                        glob(
-                            os.path.join(
-                                self.config.trained_embeddings_dir, "embedding*"
-                            )
-                        ),
-                        key=lambda x: int(
-                            x.split("/")[-1].split("_")[-1].split(".")[0]
-                        ),
-                    )
-                    for embedding_path in embeddings_paths:
-                        self.embeddings_to_optimize.append(torch.load(embedding_path))
-                else:
-                    for i in range(1, len(self.config.parts_to_return)):
-                        embedding = self.text_embedding[:, i : i + 1].clone()
-                        embedding.requires_grad_(True)
-                        self.embeddings_to_optimize.append(embedding)
+        self.embeddings_to_optimize = []
+        if self.config.train:
+            if self.config.trained_embeddings_dir is not None:
+                embeddings_paths = sorted(
+                    glob(
+                        os.path.join(self.config.trained_embeddings_dir, "embedding*")
+                    ),
+                    key=lambda x: int(x.split("/")[-1].split("_")[-1].split(".")[0]),
+                )
+                for embedding_path in embeddings_paths:
+                    self.embeddings_to_optimize.append(torch.load(embedding_path))
+            else:
+                for i in range(1, len(self.config.parts_to_return)):
+                    embedding = self.text_embedding[:, i : i + 1].clone()
+                    embedding.requires_grad_(True)
+                    self.embeddings_to_optimize.append(embedding)
 
         self.checkpoint_dir = self.config.checkpoint_dir
+        if self.config.first_stage_epoch is None:
+            self.config.first_stage_epoch = self.config.epochs
         if self.config.first_stage_epoch < self.config.epochs:
             self.pixel_classifier = PixelClassifier(
                 len(self.config.parts_to_return),
@@ -121,14 +113,8 @@ class CoSegmenterTrainer(pl.LightningModule):
         ):
             self.stage == "refine_segmentation"
             self.config.masking = "pixel_classifier"
-        # self.train_ious = []
 
     def training_step(self, batch, batch_idx):
-        optimizers = self.optimizers()
-        if not isinstance(optimizers, list):
-            optimizers = [optimizers]
-        for optimizer in optimizers:
-            optimizer.zero_grad()
         src_images, mask = batch
         if self.config.ce_weighting == "adaptive":
             num_pixels = torch.zeros(
@@ -146,35 +132,21 @@ class CoSegmenterTrainer(pl.LightningModule):
                 len(self.config.parts_to_return), dtype=torch.float
             )
         mask = mask[0]
-        # t = torch.randint(low=10, high=160, size=(1,)).item()
-        # _, text_embeddings = self.stable_diffusion.get_text_embeds("", "")
-        if self.config.objective_to_optimize == "text_embedding":
-            text_embedding = torch.cat(
-                [
-                    self.text_embedding[:, 0:1],
-                    *list(
-                        map(lambda x: x.to(self.device), self.embeddings_to_optimize)
-                    ),
-                    self.text_embedding[:, 1 + len(self.embeddings_to_optimize) :],
-                ],
-                dim=1,
-            )
-            # text_embedding = torch.cat([*list(map(lambda x:x.to(self.device), self.embeddings_to_optimize)), self.text_embedding[:, len(self.embeddings_to_optimize):]], dim=1)
-            t_embedding = torch.cat([self.uncond_embedding, text_embedding])
-        elif self.config.objective_to_optimize == "translator":
-            t_embedding = torch.cat(
-                [
-                    self.uncond_embedding,
-                    self.text_embedding + self.translator(self.text_embedding),
-                ]
-            )
+        text_embedding = torch.cat(
+            [
+                self.text_embedding[:, 0:1],
+                *list(map(lambda x: x.to(self.device), self.embeddings_to_optimize)),
+                self.text_embedding[:, 1 + len(self.embeddings_to_optimize) :],
+            ],
+            dim=1,
+        )
+        t_embedding = torch.cat([self.uncond_embedding, text_embedding])
 
         (
             sd_loss,
             _,
             sd_cross_attention_maps2,
             sd_self_attention_maps,
-            # unet_features,
         ) = self.stable_diffusion.train_step(
             t_embedding,
             src_images,
@@ -197,39 +169,40 @@ class CoSegmenterTrainer(pl.LightningModule):
                 weight=pixel_weights.to(self.stable_diffusion.device),
             )
             loss = loss1 + self.config.sd_loss_coef * sd_loss
-            if self.config.self_attention_loss_coef > 0:
+            if (
+                self.config.self_attention_loss_coef > 0
+                and not self.config.not_use_self_attention
+            ):
                 sd_cross_attention_maps2 = sd_cross_attention_maps2.softmax(dim=0)
                 loss2 = 0
-                # if sd_self_attention_maps is not None:
-                #     small_sd_cross_attention_maps2 = F.interpolate(sd_cross_attention_maps2[None, ...], 64, mode="bilinear")[0]
-                #     self_attention_map = (sd_self_attention_maps[None, ...] * small_sd_cross_attention_maps2.flatten(1,2)[..., None, None]).sum(dim=1)
-                #     one_shot_mask = torch.zeros(len(self.config.parts_to_return), mask.shape[0], mask.shape[1]).to(mask.device).scatter_(0, mask.unsqueeze(0).type(torch.int64), 1.)
-                #     loss2 = F.mse_loss(self_attention_map, one_shot_mask)
-                # self_atttention_maps = []
+
                 small_sd_cross_attention_maps2 = F.interpolate(
                     sd_cross_attention_maps2[None, ...], 64, mode="bilinear"
                 )[0]
-                for i in range(len(self.config.parts_to_return)):
-                    self_attention_map = (
-                        sd_self_attention_maps
-                        * small_sd_cross_attention_maps2[i].flatten()[..., None, None]
-                    ).sum(dim=0)
-                    loss2 = loss2 + F.mse_loss(
-                        self_attention_map, torch.where(mask == i, 1.0, 0.0)
+                self_attention_map = (
+                    sd_self_attention_maps[None, ...]
+                    * small_sd_cross_attention_maps2.flatten(1, 2)[..., None, None]
+                ).sum(dim=1)
+                one_shot_mask = (
+                    torch.zeros(
+                        len(self.config.parts_to_return),
+                        mask.shape[0],
+                        mask.shape[1],
                     )
+                    .to(mask.device)
+                    .scatter_(0, mask.unsqueeze(0).type(torch.int64), 1.0)
+                )
+                loss2 = F.mse_loss(self_attention_map, one_shot_mask) * len(
+                    self.config.parts_to_return
+                )
                 sd_self_attention_maps = None
                 small_sd_cross_attention_maps2 = None
                 self_attention_map = None
-                sd_cross_attention_maps2 = torch.unsqueeze(
-                    sd_cross_attention_maps2, dim=1
-                )
 
                 loss += self.config.self_attention_loss_coef * loss2
                 self.log("loss2", loss2.detach().cpu(), on_step=True, sync_dist=True)
             self.log("sd_loss", sd_loss.detach().cpu(), on_step=True, sync_dist=True)
             self.log("loss1", loss1.detach().cpu(), on_step=True, sync_dist=True)
-            self.manual_backward(loss)
-            optimizers[0].step()
 
         self.test_t_embedding = t_embedding
         if self.config.masking == "patched_masking":
@@ -279,9 +252,6 @@ class CoSegmenterTrainer(pl.LightningModule):
                 on_step=True,
                 sync_dist=True,
             )
-            self.manual_backward(loss)
-            optimizers[1].step()
-        # if self.current_epoch >= self.config.first_stage_epoch:
         sd_cross_attention_maps2 = None
         unet_features = None
         ious = []
@@ -320,6 +290,8 @@ class CoSegmenterTrainer(pl.LightningModule):
             # self.logger.log_image(key="train mask", images=mask[None, ...].detach().cpu(), step=self.counter)
             self.counter += 1
 
+        return loss
+
     def get_simple_masks(self, image):
         with torch.no_grad():
             (
@@ -327,7 +299,6 @@ class CoSegmenterTrainer(pl.LightningModule):
                 _,
                 sd_cross_attention_maps2,
                 _,
-                # _,
             ) = self.stable_diffusion.train_step(
                 self.test_t_embedding,
                 image,
@@ -426,7 +397,6 @@ class CoSegmenterTrainer(pl.LightningModule):
                     _,
                     sd_cross_attention_maps2,
                     sd_self_attention_maps,
-                    # _,
                 ) = self.stable_diffusion.train_step(
                     self.test_t_embedding,
                     cropped_image,
@@ -505,35 +475,27 @@ class CoSegmenterTrainer(pl.LightningModule):
                                 mode="bilinear",
                             )[
                                 0, 0
-                            ]
+                            ].cpu()
 
         final_attention_map /= aux_attention_map
         final_mask = final_attention_map.argmax(0)
         return final_mask
 
     def on_validation_start(self):
-        if self.config.objective_to_optimize == "text_embedding":
-            text_embedding = torch.cat(
-                [
-                    self.text_embedding[:, 0:1],
-                    *list(
-                        map(
-                            lambda x: x.to(self.device).detach(),
-                            self.embeddings_to_optimize,
-                        )
-                    ),
-                    self.text_embedding[:, 1 + len(self.embeddings_to_optimize) :],
-                ],
-                dim=1,
-            )
-            self.test_t_embedding = torch.cat([self.uncond_embedding, text_embedding])
-        elif self.config.objective_to_optimize == "translator":
-            self.test_t_embedding = torch.cat(
-                [
-                    self.uncond_embedding,
-                    self.text_embedding + self.translator(self.text_embedding),
-                ]
-            )
+        text_embedding = torch.cat(
+            [
+                self.text_embedding[:, 0:1],
+                *list(
+                    map(
+                        lambda x: x.to(self.device).detach(),
+                        self.embeddings_to_optimize,
+                    )
+                ),
+                self.text_embedding[:, 1 + len(self.embeddings_to_optimize) :],
+            ],
+            dim=1,
+        )
+        self.test_t_embedding = torch.cat([self.uncond_embedding, text_embedding])
 
     def on_validation_epoch_start(self):
         self.val_ious = []
@@ -585,17 +547,11 @@ class CoSegmenterTrainer(pl.LightningModule):
         epoch_mean_iou = sum(self.val_ious) / len(self.val_ious)
         if epoch_mean_iou >= self.max_val_iou:
             self.max_val_iou = epoch_mean_iou
-            if self.current_epoch < self.config.first_stage_epoch:
-                if self.config.objective_to_optimize == "text_embedding":
-                    for i, embedding in enumerate(self.embeddings_to_optimize):
-                        torch.save(
-                            embedding,
-                            os.path.join(self.checkpoint_dir, f"embedding_{i}.pth"),
-                        )
-                elif self.config.objective_to_optimize == "translator":
+            if self.current_epoch <= self.config.first_stage_epoch:
+                for i, embedding in enumerate(self.embeddings_to_optimize):
                     torch.save(
-                        self.translator.state_dict(),
-                        os.path.join(self.checkpoint_dir, "translator.pth"),
+                        embedding,
+                        os.path.join(self.checkpoint_dir, f"embedding_{i}.pth"),
                     )
             if self.config.masking == "pixel_classifier":
                 torch.save(
@@ -619,28 +575,20 @@ class CoSegmenterTrainer(pl.LightningModule):
             attention_layers_to_use=self.config.attention_layers_to_use
         )  # detach attention layers
         embeddings_to_optimize = []
-        if self.config.objective_to_optimize == "text_embedding":
-            for i in range(1, len(self.config.parts_to_return)):
-                embedding = torch.load(
-                    os.path.join(self.checkpoint_dir, f"embedding_{i-1}.pth")
-                )
-                embeddings_to_optimize.append(embedding)
-            text_embedding = torch.cat(
-                [
-                    text_embedding[:, 0:1],
-                    *list(map(lambda x: x.to(self.device), embeddings_to_optimize)),
-                    text_embedding[:, 1 + len(embeddings_to_optimize) :],
-                ],
-                dim=1,
+        for i in range(1, len(self.config.parts_to_return)):
+            embedding = torch.load(
+                os.path.join(self.checkpoint_dir, f"embedding_{i-1}.pth")
             )
-            self.test_t_embedding = torch.cat([uncond_embedding, text_embedding])
-        elif self.config.objective_to_optimize == "translator":
-            self.translator.load_state_dict(
-                torch.load(os.path.join(self.checkpoint_dir, "translator.pth"))
-            )
-            self.test_t_embedding = torch.cat(
-                [uncond_embedding, text_embedding + self.translator(text_embedding)]
-            )
+            embeddings_to_optimize.append(embedding)
+        text_embedding = torch.cat(
+            [
+                text_embedding[:, 0:1],
+                *list(map(lambda x: x.to(self.device), embeddings_to_optimize)),
+                text_embedding[:, 1 + len(embeddings_to_optimize) :],
+            ],
+            dim=1,
+        )
+        self.test_t_embedding = torch.cat([uncond_embedding, text_embedding])
         if self.config.masking == "pixel_classifier":
             self.pixel_classifier.load_state_dict(
                 torch.load(os.path.join(self.checkpoint_dir, "pixel_classifier.pth"))
@@ -699,23 +647,16 @@ class CoSegmenterTrainer(pl.LightningModule):
         print("max val mean iou: ", self.max_val_iou)
 
     def configure_optimizers(self):
-        if self.config.objective_to_optimize == "translator":
-            params = self.translator.parameters()
-        elif self.config.objective_to_optimize == "text_embedding":
-            params = self.embeddings_to_optimize
-        optimizers = []
-        text_embeddings_optimizer = getattr(optim, self.config.optimizer)(
-            [
-                {"params": params},
-                # {'params': [self.token_t], 'lr': self.config.lr},
-            ],
+        parameters = [{"params": self.embeddings_to_optimize, "lr": self.config.lr}]
+        if self.config.first_stage_epoch < self.config.epochs:
+            parameters.append(
+                {
+                    "params": self.pixel_classifier.parameters(),
+                    "lr": self.config.pixel_classifier_lr,
+                }
+            )
+        optimizer = getattr(optim, self.config.optimizer)(
+            parameters,
             lr=self.config.lr,
         )
-        optimizers.append(text_embeddings_optimizer)
-        if self.config.first_stage_epoch < self.config.epochs:
-            pixel_classifier_optimizer = getattr(optim, self.config.optimizer)(
-                self.pixel_classifier.parameters(),
-                lr=self.config.pixel_classifier_lr,
-            )
-            optimizers.append(pixel_classifier_optimizer)
-        return optimizers
+        return optimizer

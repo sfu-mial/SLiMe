@@ -47,8 +47,6 @@ class StableDiffusion(nn.Module):
         )
         self.unet = UNet2DConditionModel.from_pretrained(model_key, subfolder="unet")
 
-        del self.vae.decoder
-
         def freeze_params(params):
             for param in params:
                 param.requires_grad = False
@@ -85,7 +83,7 @@ class StableDiffusion(nn.Module):
 
         self.attention_maps = {}
 
-        def create_nested_hook_for_attentions(n):
+        def create_nested_hook_for_attention_modules(n):
             def hook(module, input, output):
                 self.attention_maps[n] = output[1]
 
@@ -95,42 +93,12 @@ class StableDiffusion(nn.Module):
         for module in attention_layers_to_use:
             self.handles.append(
                 eval("self.unet." + module).register_forward_hook(
-                    create_nested_hook_for_attentions(module)
+                    create_nested_hook_for_attention_modules(module)
                 )
             )
 
-        # self.unet_features = {}
 
-        # def create_nested_hook_for_unet(n):
-        #     def hook(module, input, output):
-        #         self.unet_features[n] = output.detach()
-
-        #     return hook
-
-        # # modules = ["unet.conv_in","unet.down_blocks[0]","unet.down_blocks[1]","unet.down_blocks[2]","unet.down_blocks[3]","unet.mid_block"]
-        # # modules = ["unet.down_blocks[0].resnets[1]","unet.up_blocks[2].upsamplers[0]","unet.up_blocks[3].resnets[2]"]
-        # # modules = [
-        # #     "vae.decoder.up_blocks[3].resnets[2]",
-        # #     "vae.decoder.up_blocks[2].resnets[2]",
-        # #     "vae.decoder.up_blocks[1].resnets[2]",
-        # #     "vae.decoder.up_blocks[0].resnets[2]",
-        # # ]
-        # modules = [
-        #     "vae.encoder.down_blocks[0].resnets[-1]",
-        #     "vae.encoder.down_blocks[1].resnets[-1]",
-        #     "vae.encoder.down_blocks[2].resnets[-1]",
-        #     "vae.encoder.down_blocks[3].resnets[-1]",
-        #     "vae.encoder.mid_block.resnets[-1]",
-        #     "vae.encoder.conv_out",
-        # ]
-        # handles = []
-
-        # for module in modules:
-        #     handles.append(
-        #         eval("self." + module).register_forward_hook(
-        #             create_nested_hook_for_unet(module)
-        #         )
-        #     )
+        del self.vae.decoder
 
     def change_hooks(self, attention_layers_to_use):
         for handle in self.handles:
@@ -138,7 +106,7 @@ class StableDiffusion(nn.Module):
         self.handles = []
         self.attention_maps = {}
 
-        def create_nested_hook_for_attentions_with_detach(n):
+        def create_nested_hook_for_attention_modules_with_detach(n):
             def hook(module, input, output):
                 self.attention_maps[n] = output[1].detach()
 
@@ -147,7 +115,7 @@ class StableDiffusion(nn.Module):
         for module in attention_layers_to_use:
             self.handles.append(
                 eval("self.unet." + module).register_forward_hook(
-                    create_nested_hook_for_attentions_with_detach(module)
+                    create_nested_hook_for_attention_modules_with_detach(module)
                 )
             )
 
@@ -417,7 +385,6 @@ class StableDiffusion(nn.Module):
             sd_cross_attention_maps1,
             sd_cross_attention_maps2,
             sd_self_attention_maps,
-            # unet_features,
         )
 
     def produce_latents(

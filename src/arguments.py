@@ -56,10 +56,8 @@ def add_base_args(parser):
     parser.add_argument("--noise_dir", type=str, default=None)
     parser.add_argument("--checkpoint_dir", type=str, required=True)
     parser.add_argument("--parts_to_return", nargs="+", type=str, required=False)
-    parser.add_argument("--objective_to_optimize", type=str, default="text_embedding")
     parser.add_argument("--log_images", action="store_true", default=False)
     parser.add_argument("--text_prompt", type=str, default="")
-    parser.add_argument("--argmax_ca_before_sa", action="store_true", default=False)
     parser.add_argument("--not_use_self_attention", action="store_true", default=False)
     parser.add_argument("--guidance_scale", type=int, default=100)
     parser.add_argument("--trained_embeddings_dir", type=str, default=None)
@@ -131,17 +129,15 @@ def add_train_args(parser):
     parser.add_argument(
         "--use_all_tokens_for_training", action="store_true", default=False
     )
-    parser.add_argument("--skip_zooming", action="store_true", default=False)
     parser.add_argument("--train_t", nargs="+", type=int, default=20)
     parser.add_argument("--accumulate_grad_batches", type=int, default=1)
-    parser.add_argument("--class_weights", nargs="+", type=float)
     parser.add_argument("--ce_weighting", type=str, default="constant")
     parser.add_argument("--self_attention_loss_coef", type=float, default=1.0)
     parser.add_argument("--sd_loss_coef", type=float, default=0)
     parser.add_argument("--pixel_classifier_loss_coef", type=float, default=0)
     parser.add_argument("--min_crop_ratio", type=float, default=0.8)
     parser.add_argument("--sample_noise_on_epoch", action="store_true", default=False)
-    parser.add_argument("--first_stage_epoch", type=int, default=150)
+    parser.add_argument("--first_stage_epoch", type=int, default=None)
     return parser
 
 
@@ -149,13 +145,11 @@ def add_test_args(parser):
     parser.add_argument(
         "--masking",
         type=str,
-        default="zoomed_masking",
-        choices=["zoomed_masking", "patched_masking", "pixel_classifier", "simple"],
+        default="patched_masking",
+        choices=["patched_masking", "pixel_classifier", "simple"],
     )
     parser.add_argument("--num_patchs_per_side", type=int)
     parser.add_argument("--patch_size", type=int)
-    parser.add_argument("--crop_margin", default=10, type=int)
-    parser.add_argument("--min_square_size", default=100, type=int)
     parser.add_argument("--patch_threshold", type=float)
     parser.add_argument("--test_t", nargs="+", type=int, default=20)
     parser.add_argument("--test_mask_size", type=int, default=512)

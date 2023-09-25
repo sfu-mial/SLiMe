@@ -13,10 +13,7 @@ from src.arguments import init_args
 
 
 def main():
-    # torch.manual_seed(42)
     config = init_args()
-    # config = Config()
-    # wandb_logger = WandbLogger()
 
     if config.dataset == "sample":
         dm = SampleDataModule(
@@ -99,15 +96,11 @@ def main():
         gpu_id = config.gpu_id
     trainer = pl.Trainer(
         accelerator="gpu",
-        # strategy="dp",
         default_root_dir=config.base_dir,
         max_epochs=config.epochs,
         devices=gpu_id,
         accumulate_grad_batches=config.accumulate_grad_batches,
-        # precision=16,
-        # logger=wandb_logger,
         log_every_n_steps=1,
-        # accumulate_grad_batches=config.train_num_crops // config.batch_size,
         enable_checkpointing=False,
         num_sanity_val_steps=0,
     )
