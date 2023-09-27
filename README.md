@@ -1,4 +1,5 @@
 # SLiMe: Segment Like Me
+![SLiMe Method](https://github.com/aliasgharkhani/one_shot_segmentation/blob/public/media/slime_teaser.gif)
 **[Paper](https://arxiv.org/abs/2309.03179)**
 
 PyTorch implementation of SLiMe: Segment Like Me, a 1-shot image segmentation method based on Stable Diffusion. <br><br>
