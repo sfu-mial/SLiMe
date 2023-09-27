@@ -2,7 +2,6 @@ import argparse
 
 
 def add_base_args(parser):
-    parser.add_argument("--base_dir", type=str, default="")
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument(
         "--attention_layers_to_use",
@@ -45,99 +44,36 @@ def add_base_args(parser):
     )
 
     parser.add_argument("--gpu_id", type=int, default=0)
-    parser.add_argument("--second_gpu_id", type=int, default=None)
     parser.add_argument("--train", action="store_true", default=False)
+    parser.add_argument("--part_names", nargs="+", type=str)
+    parser.add_argument("--checkpoint_dir", type=str, default="outputs")
+    parser.add_argument("--text_prompt", type=str, default=None)
+    parser.add_argument("--output_dir", type=str, default="outputs")
+    return parser
+
+
+def add_dataset_args(parser):
     parser.add_argument(
-        "--dataset",
+        "--dataset_name",
         type=str,
         default="pascal",
-        choices=["sample", "pascal", "celeba-hq", "paper_test", "ade20k", "cat15"],
+        choices=["sample", "pascal", "celeba"],
     )
-    parser.add_argument("--noise_dir", type=str, default=None)
-    parser.add_argument("--checkpoint_dir", type=str, required=True)
-    parser.add_argument("--parts_to_return", nargs="+", type=str, required=False)
-    parser.add_argument("--log_images", action="store_true", default=False)
-    parser.add_argument("--text_prompt", type=str, default="")
-    parser.add_argument("--not_use_self_attention", action="store_true", default=False)
-    parser.add_argument("--guidance_scale", type=int, default=100)
-    parser.add_argument("--trained_embeddings_dir", type=str, default=None)
-    return parser
-
-
-def add_sample_dataset_args(parser):
-    parser.add_argument("--src_image_paths", nargs="+", type=str)
-    parser.add_argument("--src_mask_paths", nargs="+", type=str)
-    parser.add_argument("--target_image_path", nargs="+", type=str)
-    return parser
-
-
-def add_ade20k_dataset_args(parser):
     parser.add_argument("--train_data_dir", type=str)
+    parser.add_argument("--val_data_dir", type=str)
     parser.add_argument("--test_data_dir", type=str)
-    return parser
-
-
-def add_pascal_dataset_args(parser):
-    parser.add_argument("--object_name", type=str)
-    parser.add_argument("--train_data_file_ids_file", type=str)
-    parser.add_argument("--val_data_file_ids_file", type=str)
-    parser.add_argument("--blur_background", action="store_true", default=False)
-    parser.add_argument(
-        "--fill_background_with_black", action="store_true", default=False
-    )
-    parser.add_argument(
-        "--remove_overlapping_objects", action="store_true", default=False
-    )
-    parser.add_argument("--single_object", action="store_true", default=False)
-    parser.add_argument("--adjust_bounding_box", action="store_true", default=False)
-    parser.add_argument("--min_crop_size", type=int)
-    parser.add_argument("--object_overlapping_threshold", type=float)
-    parser.add_argument("--ann_file_base_dir", type=str)
-    parser.add_argument("--images_base_dir", type=str)
-    parser.add_argument(
-        "--car_test_data_dir", type=str, default="/home/aka225/scratch/data/Car_TestSet"
-    )
-    parser.add_argument("--keep_aspect_ratio", action="store_true", default=False)
-    return parser
-
-
-def add_celeba_dataset_args(parser):
-    parser.add_argument("--images_dir", type=str)
-    parser.add_argument("--masks_dir", type=str)
-    parser.add_argument("--idx_mapping_file", type=str)
-    parser.add_argument("--test_file_names_file_path", type=str)
-    parser.add_argument("--train_file_names_file_path", type=str)
-    parser.add_argument("--val_file_names_file_path", type=str)
-    parser.add_argument("--human_version", type=str, default="10")
-    return parser
-
-
-def add_paper_test_dataset_args(parser):
-    parser.add_argument("--test_images_dir", type=str)
-    parser.add_argument("--test_masks_dir", type=str)
+    parser.add_argument("--min_crop_ratio", type=float, default=0.8)
     return parser
 
 
 def add_train_args(parser):
     parser.add_argument("--optimizer", type=str, default="Adam")
-    parser.add_argument("--epochs", type=int, default=40)
+    parser.add_argument("--epochs", type=int, default=200)
     parser.add_argument("--lr", type=float, default=0.1)
-    parser.add_argument("--pixel_classifier_lr", type=float, default=0.001)
-    parser.add_argument("--train_mask_size", type=int, default=128)
-    parser.add_argument("--val_data_ids", nargs="+", type=int)
-    parser.add_argument("--train_data_ids", nargs="+", type=int)
-    parser.add_argument(
-        "--use_all_tokens_for_training", action="store_true", default=False
-    )
-    parser.add_argument("--train_t", nargs="+", type=int, default=20)
-    parser.add_argument("--accumulate_grad_batches", type=int, default=1)
-    parser.add_argument("--ce_weighting", type=str, default="constant")
+    parser.add_argument("--train_mask_size", type=int, default=64)
+    parser.add_argument("--train_t", nargs="+", type=int, default=[5, 100])
     parser.add_argument("--self_attention_loss_coef", type=float, default=1.0)
-    parser.add_argument("--sd_loss_coef", type=float, default=0)
-    parser.add_argument("--pixel_classifier_loss_coef", type=float, default=0)
-    parser.add_argument("--min_crop_ratio", type=float, default=0.8)
-    parser.add_argument("--sample_noise_on_epoch", action="store_true", default=False)
-    parser.add_argument("--first_stage_epoch", type=int, default=None)
+    parser.add_argument("--sd_loss_coef", type=float, default=0.005)
     return parser
 
 
@@ -146,25 +82,22 @@ def add_test_args(parser):
         "--masking",
         type=str,
         default="patched_masking",
-        choices=["patched_masking", "pixel_classifier", "simple"],
+        choices=["patched_masking", "simple"],
     )
-    parser.add_argument("--num_patchs_per_side", type=int)
-    parser.add_argument("--patch_size", type=int)
-    parser.add_argument("--patch_threshold", type=float)
-    parser.add_argument("--test_t", nargs="+", type=int, default=20)
+    parser.add_argument("--num_patchs_per_side", type=int, default=2)
+    parser.add_argument("--patch_size", type=int, default=400)
+    parser.add_argument("--patch_threshold", type=float, default=0.2)
+    parser.add_argument("--test_t", nargs="+", type=int, default=[100])
     parser.add_argument("--test_mask_size", type=int, default=512)
+    parser.add_argument("--save_test_predictions", action="store_true", default=False)
     return parser
 
 
 def init_args():
     parser = argparse.ArgumentParser()
     parser = add_base_args(parser)
-    parser = add_sample_dataset_args(parser)
-    parser = add_pascal_dataset_args(parser)
-    parser = add_celeba_dataset_args(parser)
-    parser = add_paper_test_dataset_args(parser)
+    parser = add_dataset_args(parser)
     parser = add_train_args(parser)
     parser = add_test_args(parser)
-    parser = add_ade20k_dataset_args(parser)
     args = parser.parse_args()
     return args

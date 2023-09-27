@@ -2,98 +2,14 @@ import math
 import numpy as np
 import torch
 import random
-
-
-def adjust_bbox_coords(
-    long_side_length,
-    short_side_length,
-    short_side_coord_min,
-    short_side_coord_max,
-    short_side_original_length,
-):
-    margin = (long_side_length - short_side_length) / 2
-    short_side_coord_min -= math.ceil(margin)
-    short_side_coord_max += math.floor(margin)
-    short_side_coord_max -= min(0, short_side_coord_min)
-    short_side_coord_min = max(0, short_side_coord_min)
-    short_side_coord_min += min(short_side_original_length - short_side_coord_max, 0)
-    short_side_coord_max = min(short_side_original_length, short_side_coord_max)
-
-    return short_side_coord_min, short_side_coord_max
-
-
-def get_square_cropping_coords(mask, min_square_size=0, margin=None, original_size=512):
-    ys, xs = torch.where(mask == 1)
-    # min_square_size = max(min(max(int(torch.sqrt(mask.sum() * 10).item()), 100), original_size), min_square_size)
-    x_start, x_end, y_start, y_end = (
-        xs.min().item(),
-        xs.max().item() + 1,
-        ys.min().item(),
-        ys.max().item() + 1,
-    )
-    w, h = x_end - x_start, y_end - y_start
-    aux_min_square_size = 0
-    if margin is not None:
-        aux_min_square_size = min(
-            max(w, h) + int(max(w, h) * margin / 100), original_size
-        )
-    min_square_size = max(aux_min_square_size, min_square_size)
-    if max(w, h) < min_square_size:
-        if w < h:
-            # diff = max(min_square_size, h) - h
-            diff = min_square_size - h
-            offset_start, offset_end = math.ceil(diff / 2), math.floor(diff / 2)
-            if y_start - math.ceil(diff / 2) < 0:
-                offset_end -= y_start - math.ceil(diff / 2)
-                offset_start = y_start
-            elif y_end + math.floor(diff / 2) > original_size:
-                offset_start += y_end + math.floor(diff / 2) - original_size
-                offset_end = original_size - y_end
-            y_start -= offset_start
-            y_end += offset_end
-
-        elif h < w:
-            # diff = max(512 // 2, w) - w
-            diff = min_square_size - w
-            offset_start, offset_end = math.ceil(diff / 2), math.floor(diff / 2)
-            if x_start - math.ceil(diff / 2) < 0:
-                offset_end -= x_start - math.ceil(diff / 2)
-                offset_start = x_start
-            elif x_end + math.floor(diff / 2) > original_size:
-                offset_start += x_end + math.floor(diff / 2) - original_size
-                offset_end = original_size - x_end
-            x_start -= offset_start
-            x_end += offset_end
-
-    w, h = x_end - x_start, y_end - y_start
-    if w > h:
-        y_start, y_end = adjust_bbox_coords(w, h, y_start, y_end, original_size)
-    elif w < h:
-        x_start, x_end = adjust_bbox_coords(h, w, x_start, x_end, original_size)
-    return x_start, x_end, y_start, y_end, max(w, h)
+import colorsys
+import cv2
 
 
 def calculate_iou(prediction, mask):
     intersection = prediction * mask
     union = prediction + mask - intersection
     return intersection.sum() / (union.sum() + 1e-7)
-
-
-def post_process_attention_map(attention_map, target_coords):
-    y_start, y_end, x_start, x_end = target_coords
-    patch_size = y_end - y_start
-    if attention_map.shape[0] != patch_size:
-        attention_map = torch.nn.functional.interpolate(
-            attention_map[None, None, ...], patch_size, mode="bilinear"
-        )[0, 0]
-
-    attention_map = (attention_map - attention_map.min()) / (
-        attention_map.max() - attention_map.min()
-    )
-    original_size_attention_map = torch.zeros(512, 512)
-    original_size_attention_map[y_start:y_end, x_start:x_end] = attention_map
-    # binarized_original_size_attention_map = torch.where(original_size_attention_map > threshold, 1., 0.)
-    return original_size_attention_map
 
 
 def get_crops_coords(image_size, patch_size, num_patchs_per_side):
@@ -116,11 +32,6 @@ def get_crops_coords(image_size, patch_size, num_patchs_per_side):
     return crops_coords
 
 
-def get_bbox_data(mask):
-    ys, xs = np.where(mask == 1)
-    return xs.min(), xs.max(), ys.min(), ys.max()
-
-
 def get_random_crop_coordinates(crop_scale_range, image_width, image_height):
     rand_number = random.random()
     rand_number *= crop_scale_range[1] - crop_scale_range[0]
@@ -133,3 +44,55 @@ def get_random_crop_coordinates(crop_scale_range, image_width, image_height):
         x_start = 0
         y_start = 0
     return x_start, x_start + patch_size, y_start, y_start + patch_size
+
+
+def generate_distinct_colors(n):
+    colors = []
+    if n == 1:
+        return [(255, 255, 255)]
+    for i in range(n):
+        hue = i / n
+        saturation = 0.9
+        value = 0.9
+        rgb = colorsys.hsv_to_rgb(hue, saturation, value)
+        scaled_rgb = tuple(int(x * 255) for x in rgb)
+        colors.append(scaled_rgb)
+    return colors
+
+
+def get_boundry_and_eroded_mask(mask):
+    kernel = np.ones((7, 7), np.uint8)
+    eroded_mask = np.zeros_like(mask)
+    boundry_mask = np.zeros_like(mask)
+    for part_mask_idx in np.unique(mask)[1:]:
+        part_mask = np.where(mask == part_mask_idx, 1, 0)
+        part_mask_erosion = cv2.erode(part_mask.astype(np.uint8), kernel, iterations=1)
+        part_boundry_mask = part_mask - part_mask_erosion
+        eroded_mask = np.where(part_mask_erosion > 0, part_mask_idx, eroded_mask)
+        boundry_mask = np.where(part_boundry_mask > 0, part_mask_idx, boundry_mask)
+    return eroded_mask, boundry_mask
+
+
+def get_colored_segmentation(mask, boundry_mask, image, colors):
+    boundry_mask_rgb = 0
+    if boundry_mask is not None:
+        boundry_mask_rgb = torch.repeat_interleave(boundry_mask[None, ...], 3, 0).type(
+            torch.float
+        )
+        for j in range(3):
+            for i in range(1, len(colors) + 1):
+                boundry_mask_rgb[j] = torch.where(
+                    boundry_mask_rgb[j] == i,
+                    colors[i - 1][j] / 255,
+                    boundry_mask_rgb[j],
+                )
+    mask_rgb = torch.repeat_interleave(mask[None, ...], 3, 0).type(torch.float)
+    for j in range(3):
+        for i in range(1, len(colors) + 1):
+            mask_rgb[j] = torch.where(
+                mask_rgb[j] == i, colors[i - 1][j] / 255, mask_rgb[j]
+            )
+    if boundry_mask is not None:
+        return (boundry_mask_rgb * 0.6 + mask_rgb * 0.3 + image * 0.4).permute(1, 2, 0)
+    else:
+        return (mask_rgb * 0.6 + image * 0.4).permute(1, 2, 0)

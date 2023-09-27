@@ -18,13 +18,11 @@ class StableDiffusion(nn.Module):
         self,
         sd_version="2.0",
         step_guidance=None,
-        partial_run=False,
         attention_layers_to_use=[],
     ):
         super().__init__()
 
         self.sd_version = sd_version
-        self.partial_run = partial_run
         print(f"[INFO] loading stable diffusion...")
 
         if self.sd_version == "2.1":
@@ -47,20 +45,18 @@ class StableDiffusion(nn.Module):
         )
         self.unet = UNet2DConditionModel.from_pretrained(model_key, subfolder="unet")
 
-        def freeze_params(params):
-            for param in params:
-                param.requires_grad = False
-
-        freeze_params(self.vae.parameters())
-        freeze_params(self.text_encoder.parameters())
-        freeze_params(self.unet.parameters())
+        for param in self.vae.parameters():
+            param.requires_grad = False
+        for param in self.text_encoder.parameters():
+            param.requires_grad = False
+        for param in self.unet.parameters():
+            param.requires_grad = False
 
         self.vae.eval()
         self.text_encoder.eval()
         self.unet.eval()
-
+        del self.vae.decoder
         self.scheduler = DDIMScheduler.from_config(model_key, subfolder="scheduler")
-        # self.scheduler = PNDMScheduler.from_config(model_key, subfolder="scheduler")
 
         self.num_train_timesteps = self.scheduler.config.num_train_timesteps
         self.min_step = int(self.num_train_timesteps * 0.020)
@@ -68,18 +64,12 @@ class StableDiffusion(nn.Module):
         if step_guidance is not None:
             self.min_step, self.max_step = step_guidance
 
-        # print(f"with min={self.min_step} and max={self.max_step}")
         self.alphas = self.scheduler.alphas_cumprod  # for convenience
         self.device = None
         self.device1 = None
         print(f"[INFO] loaded stable diffusion!")
 
         self.noise = None
-        if self.partial_run:
-            # del self.unet.up_blocks[3]
-            del self.unet.conv_norm_out
-            del self.unet.conv_act
-            del self.unet.conv_out
 
         self.attention_maps = {}
 
@@ -96,9 +86,6 @@ class StableDiffusion(nn.Module):
                     create_nested_hook_for_attention_modules(module)
                 )
             )
-
-
-        del self.vae.decoder
 
     def change_hooks(self, attention_layers_to_use):
         for handle in self.handles:
@@ -122,14 +109,11 @@ class StableDiffusion(nn.Module):
     def setup(self, device, device1=None):
         self.device1 = device if device1 is None else device1
         self.vae = self.vae.to(device)
-        # self.text_encoder = self.text_encoder.to(device)
         self.unet = self.unet.to(self.device1)
         self.alphas = self.alphas.to(device)
         self.device = device
 
     def get_text_embeds(self, prompt, negative_prompt, **kwargs):
-        # prompt, negative_prompt: [str]
-
         # Tokenize text and get embeddings
         text_input = self.tokenizer(
             prompt,
@@ -335,7 +319,6 @@ class StableDiffusion(nn.Module):
                 latent_model_input.to(self.device1),
                 t.to(self.device1),
                 encoder_hidden_states=text_embeddings.to(self.device1),
-                partial_run=self.partial_run,
             ).sample.to(self.device)
             # unet_features = list(self.unet_features.values())
 
@@ -359,27 +342,6 @@ class StableDiffusion(nn.Module):
             noise_pred_text - noise_pred_uncond
         )
         loss = F.mse_loss(noise_pred, noise, reduction="none").mean([1, 2, 3]).mean()
-
-        # if not self.partial_run:
-        #     # perform guidance (high scale from paper!)
-        #     noise_pred_uncond, noise_pred_text = noise_pred_.chunk(2)
-        #     noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
-        #
-        #     # w(t), sigma_t^2
-        #     # w = (1 - self.alphas[t])
-        #     w = self.alphas[t] ** 0.5 * (1 - self.alphas[t])
-        #     grad = w * (noise_pred - noise)
-        #     # clip grad for stable training?
-        #     # grad = grad.clamp(-10, 10)
-        #     grad = torch.nan_to_num(grad)
-        #     loss = F.mse_loss(noise_pred, noise.float())
-        #     # manually backward, since we omitted an item in grad and cannot simply autodiff.
-        #     # _t = time.time()
-        #     if back_propagate_loss:
-        #         latents.backward(gradient=grad * loss_coef, retain_graph=True)
-        #     # torch.cuda.synchronize(); print(f'[TIME] guiding: backward {time.time() - _t:.4f}s')
-        #
-        #     return loss, sd_cross_attention_maps1, sd_cross_attention_maps2, sd_self_attention_maps
         return (
             loss,
             sd_cross_attention_maps1,
@@ -487,8 +449,8 @@ class StableDiffusion(nn.Module):
         # Img latents -> imgs
         imgs = self.decode_latents(latents)  # [1, 3, 512, 512]
 
-        # # # Img to Numpy
-        # imgs = imgs.detach().cpu().permute(0, 2, 3, 1).numpy()
-        # imgs = (imgs * 255).round().astype('uint8')
+        # # Img to Numpy
+        imgs = imgs.detach().cpu().permute(0, 2, 3, 1).numpy()
+        imgs = (imgs * 255).round().astype("uint8")
 
         return imgs, all_attention_maps
